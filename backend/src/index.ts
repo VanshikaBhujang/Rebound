@@ -37,9 +37,11 @@ export const prisma = prismaClient.$extends({
 
 // CORS — allow frontend origin from env var (set on Render)
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:3000',
-  'http://localhost:3000',
-];
+  'https://rebound-taupe-theta.vercel.app',  // production frontend
+  process.env.FRONTEND_URL,                   // from Render env var
+  'http://localhost:3000',                    // local dev
+].filter(Boolean) as string[];
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, etc.)

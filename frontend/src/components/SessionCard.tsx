@@ -37,7 +37,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
       // 1. Calculate overall session duration
       const sessionStart = new Date(session.startTime).getTime();
       const sessionEnd = session.endTime ? new Date(session.endTime).getTime() : Date.now();
-      const sessionDiff = sessionEnd - sessionStart;
+      const sessionDiff = Math.max(0, sessionEnd - sessionStart); // guard against clock skew
       const sh = Math.floor(sessionDiff / 3600000);
       const sm = Math.floor((sessionDiff % 3600000) / 60000);
       const ss = Math.floor((sessionDiff % 60000) / 1000);
@@ -47,7 +47,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
       // 2. Calculate active table play duration & live cost
       if (activePlay) {
         const playStart = new Date(activePlay.startTime).getTime();
-        const playDiff = Date.now() - playStart;
+        const playDiff = Math.max(0, Date.now() - playStart);
         const ph = Math.floor(playDiff / 3600000);
         const pm = Math.floor((playDiff % 3600000) / 60000);
         const ps = Math.floor((playDiff % 60000) / 1000);
@@ -66,7 +66,9 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
       }
     };
 
-    tick();
+    tick(); // run immediately so there is no blank flash on mount
+    // Only keep ticking for active sessions; completed sessions are frozen
+    if (session.endTime) return;
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [session, activePlay]);

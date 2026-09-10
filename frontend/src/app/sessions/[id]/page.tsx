@@ -348,8 +348,18 @@ export default function SessionDetailsPage() {
   const [playPlayerCount, setPlayPlayerCount] = useState('1');
   const [playLoading, setPlayLoading] = useState(false);
 
-  // Live timers
-  const [elapsed, setElapsed] = useState('');
+  // Live timers — initialize immediately from session data to avoid blank flash
+  const [elapsed, setElapsed] = useState(() => {
+    if (!session) return '';
+    const start = new Date(session.startTime).getTime();
+    const end = session.endTime ? new Date(session.endTime).getTime() : Date.now();
+    const diffMs = end - start;
+    const h = Math.floor(diffMs / 3600000);
+    const m = Math.floor((diffMs % 3600000) / 60000);
+    const s = Math.floor((diffMs % 60000) / 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  });
   const [activePlayElapsed, setActivePlayElapsed] = useState('');
 
   // WhatsApp sending states
@@ -383,27 +393,31 @@ export default function SessionDetailsPage() {
     }
   });
 
-  // Overall session duration timer
+  // Overall session duration timer — consistent HH:MM:SS format for both active and completed
   useEffect(() => {
     if (!session) return;
-    if (session.status === 'completed' && session.endTime) {
-      const diffMs =
-        new Date(session.endTime).getTime() - new Date(session.startTime).getTime();
-      const h = Math.floor(diffMs / 3600000);
-      const m = Math.floor((diffMs % 3600000) / 60000);
-      setElapsed(`${h}h ${String(m).padStart(2, '0')}m`);
-      return;
-    }
-    const tick = () => {
-      const diffMs = Date.now() - new Date(session.startTime).getTime();
+
+    const computeElapsed = () => {
+      const start = new Date(session.startTime).getTime();
+      // For completed sessions use the frozen endTime; for active use live clock
+      const end = (session.status === 'completed' && session.endTime)
+        ? new Date(session.endTime).getTime()
+        : Date.now();
+      const diffMs = Math.max(0, end - start);
       const h = Math.floor(diffMs / 3600000);
       const m = Math.floor((diffMs % 3600000) / 60000);
       const s = Math.floor((diffMs % 60000) / 1000);
       const pad = (n: number) => String(n).padStart(2, '0');
-      setElapsed(`${pad(h)}:${pad(m)}:${pad(s)}`);
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
     };
-    tick();
-    const iv = setInterval(tick, 1000);
+
+    // Set immediately so there is never a blank or stale flash
+    setElapsed(computeElapsed());
+
+    // Only tick for active sessions; completed sessions are frozen
+    if (session.status === 'completed') return;
+
+    const iv = setInterval(() => setElapsed(computeElapsed()), 1000);
     return () => clearInterval(iv);
   }, [session]);
 
