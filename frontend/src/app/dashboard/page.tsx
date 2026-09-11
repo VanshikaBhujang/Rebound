@@ -962,7 +962,7 @@ export default function DashboardPage() {
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-extrabold text-white text-sm tracking-tight">{session.customerName}</span>
+                          <span className="font-extrabold text-white text-sm tracking-normal [word-spacing:0.25em]">{session.customerName}</span>
                           <span className="inline-flex items-center text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2 py-0.5 rounded-lg shrink-0">
                             ₹{(session.totalBill || 0).toFixed(2)}
                           </span>

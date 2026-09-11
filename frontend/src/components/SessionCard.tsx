@@ -123,9 +123,13 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session, onOrderAdded,
 
         {/* Customer Name & Phone */}
         <div className="flex flex-col">
-          <h3 className="text-lg font-extrabold text-white flex items-center gap-2 font-display tracking-tight">
+          <h3 className="text-lg font-extrabold text-white flex items-center gap-2 font-display tracking-normal">
             <User className="h-4 w-4 text-cyan-400 shrink-0" />
-            <span>{session.customerName}</span>
+            <span className="inline-flex flex-wrap items-center gap-x-2">
+              {session.customerName.split(/\s+/).map((part, idx) => (
+                <span key={idx}>{part}</span>
+              ))}
+            </span>
           </h3>
           {session.customerPhone && (
             <p className="text-xs font-mono font-semibold text-slate-400 flex items-center gap-1.5 mt-0.5 ml-6">

@@ -980,9 +980,13 @@ export default function SessionDetailsPage() {
             {/* Customer */}
             <div>
               <span className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest font-mono">Customer</span>
-              <h1 className="text-2xl font-extrabold text-white mt-1 flex items-center gap-2 font-display tracking-tight">
+              <h1 className="text-2xl font-extrabold text-white mt-1 flex items-center gap-2 font-display tracking-normal">
                 <User className="h-5 w-5 text-cyan-400 shrink-0" />
-                <span>{session.customerName}</span>
+                <span className="inline-flex flex-wrap items-center gap-x-2.5">
+                  {session.customerName.split(/\s+/).map((part, idx) => (
+                    <span key={idx}>{part}</span>
+                  ))}
+                </span>
               </h1>
               {session.customerPhone && (
                 <p className="text-xs font-mono font-semibold text-slate-400 flex items-center gap-1.5 mt-1 ml-0.5">
