@@ -11,6 +11,7 @@ import { TableStatusBar } from '../../components/TableStatusBar';
 import { SessionCard } from '../../components/SessionCard';
 import { NewSessionModal } from '../../components/NewSessionModal';
 import { BookTableModal } from '../../components/BookTableModal';
+import { AddOrderModal } from '../../components/AddOrderModal';
 import { 
   Play, 
   Calendar, 
@@ -52,11 +53,16 @@ export default function DashboardPage() {
   const [showBookTable, setShowBookTable] = useState(false);
   const [showAddUdhar, setShowAddUdhar] = useState(false);
   const [showActiveDrawer, setShowActiveDrawer] = useState(false);
+  const [activeOrderSessionId, setActiveOrderSessionId] = useState<string | null>(null);
   const [liveSessionSearch, setLiveSessionSearch] = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');
+  const globalSearchRef = useRef<HTMLInputElement>(null);
   // Add Udhar state
   const [newUdharCustomer, setNewUdharCustomer] = useState('');
   const [newUdharAmount, setNewUdharAmount] = useState('');
   const [udharError, setUdharError] = useState('');
+  const [showUdharSuggestions, setShowUdharSuggestions] = useState(false);
+  const [customerProfiles, setCustomerProfiles] = useState<{ customerName: string; customerPhone?: string }[]>([]);
 
   const [loadingData, setLoadingData] = useState(true);
 
@@ -312,6 +318,91 @@ export default function DashboardPage() {
     });
   }, [udhars]);
 
+  // Fetch all known customers for autocomplete across the dashboard
+  useEffect(() => {
+    const fetchCustomerProfiles = async () => {
+      try {
+        const cached = localStorage.getItem('rebound_customer_profiles_cache');
+        if (cached) {
+          const { profiles, timestamp } = JSON.parse(cached);
+          if (Date.now() - timestamp < 30 * 60 * 1000 && Array.isArray(profiles)) {
+            setCustomerProfiles(profiles);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const raw = await api.get('/sessions/customers/all');
+        if (Array.isArray(raw)) {
+          const profiles = raw.map((item: any) =>
+            typeof item === 'string'
+              ? { customerName: item, customerPhone: '' }
+              : { customerName: item.customerName || '', customerPhone: item.customerPhone || '' }
+          );
+          setCustomerProfiles(profiles);
+          localStorage.setItem('rebound_customer_profiles_cache', JSON.stringify({ profiles, timestamp: Date.now() }));
+        }
+      } catch (err) {
+        console.error('Failed to load customer profiles:', err);
+      }
+    };
+    fetchCustomerProfiles();
+  }, []);
+
+  // Merge database customer profiles, active sessions, and udhars into unified customer list
+  const allKnownCustomers = React.useMemo(() => {
+    const map = new Map<string, { customerName: string; customerPhone?: string; outstanding?: number }>();
+
+    // 1. Database customer profiles
+    customerProfiles.forEach((p) => {
+      const key = p.customerName.trim().toLowerCase();
+      if (key && !map.has(key)) {
+        map.set(key, { customerName: p.customerName.trim(), customerPhone: p.customerPhone });
+      }
+    });
+
+    // 2. Active sessions
+    activeSessions.forEach((s) => {
+      const key = (s.customerName || '').trim().toLowerCase();
+      if (key && !map.has(key)) {
+        map.set(key, { customerName: s.customerName.trim(), customerPhone: s.customerPhone || undefined });
+      }
+    });
+
+    // 3. Existing debtors with current outstanding
+    groupedUdharsList.forEach((u) => {
+      const key = u.customerName.trim().toLowerCase();
+      const existing = map.get(key);
+      const totalDebt = u.entries.filter(e => e.status === 'unpaid').reduce((sum, e) => sum + e.amount, 0);
+      if (existing) {
+        existing.outstanding = totalDebt;
+      } else {
+        map.set(key, { customerName: u.customerName, outstanding: totalDebt });
+      }
+    });
+
+    return Array.from(map.values());
+  }, [customerProfiles, activeSessions, groupedUdharsList]);
+
+  // Suggestions for Log Udhar input
+  const udharSuggestions = React.useMemo(() => {
+    const q = newUdharCustomer.trim().toLowerCase();
+    if (!q) return [];
+    return allKnownCustomers.filter((c) => {
+      const nameMatch = c.customerName.toLowerCase().includes(q);
+      const phoneMatch = c.customerPhone && c.customerPhone.includes(q);
+      return nameMatch || phoneMatch;
+    }).slice(0, 8);
+  }, [newUdharCustomer, allKnownCustomers]);
+
+  // Selected customer existing debt summary
+  const selectedCustomerUdhar = React.useMemo(() => {
+    const q = newUdharCustomer.trim().toLowerCase();
+    if (!q) return null;
+    return allKnownCustomers.find((c) => c.customerName.toLowerCase() === q && (c.outstanding || 0) > 0);
+  }, [newUdharCustomer, allKnownCustomers]);
+
   if (authLoading || !user) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#0a0d14]">
@@ -516,6 +607,136 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {/* Global Search Bar */}
+        <div className="relative">
+          <div className="relative flex items-center bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 shadow-xl px-4 py-3 gap-3 focus-within:border-cyan-500/60 focus-within:shadow-[0_0_20px_rgba(0,242,254,0.1)] transition-all duration-300">
+            <Search className="h-4 w-4 text-cyan-400 shrink-0" />
+            <input
+              ref={globalSearchRef}
+              type="text"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              placeholder="Search sessions by customer name..."
+              className="flex-1 bg-transparent text-sm text-white placeholder-slate-500 focus:outline-none font-semibold"
+            />
+            {globalSearch && (
+              <button
+                onClick={() => setGlobalSearch('')}
+                className="text-slate-500 hover:text-slate-300 transition-colors shrink-0"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Search Results Dropdown */}
+          {globalSearch.trim() && (() => {
+            const q = globalSearch.trim().toLowerCase();
+            const matchedActive = activeSessions.filter(s => s.customerName.toLowerCase().includes(q));
+            const matchedCompleted = completedSessions.filter(s => s.customerName.toLowerCase().includes(q));
+            const hasResults = matchedActive.length > 0 || matchedCompleted.length > 0;
+
+            return (
+              <div className="absolute top-full left-0 right-0 mt-2 z-40 bg-[#0e131f]/95 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                {!hasResults ? (
+                  <div className="p-6 text-center text-slate-500 text-sm font-semibold">
+                    No sessions found for &ldquo;{globalSearch}&rdquo;
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800/80">
+
+                    {/* Active Sessions Section */}
+                    <div className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-400 font-mono">Active Sessions</span>
+                        <span className="text-[10px] font-bold text-slate-500 font-mono">({matchedActive.length})</span>
+                      </div>
+                      {matchedActive.length === 0 ? (
+                        <p className="text-xs text-slate-600 font-semibold pl-4">No active sessions match.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {matchedActive.map((session) => {
+                            const tableNames = session.tablePlays?.filter((tp: any) => !tp.endTime).map((tp: any) => tp.gameType === 'PS4' ? 'PS4' : `${tp.gameType} (T${tp.table?.number || ''})`).join(', ') || 'No Active Table';
+                            const ordersTotal = session.orders?.reduce((sum: number, o: any) => sum + o.quantity * (o.menuItem?.price || o.price || 0), 0) || 0;
+                            const completedPlaysTotal = session.tablePlays?.filter((tp: any) => tp.endTime).reduce((sum: number, tp: any) => sum + tp.cost, 0) || 0;
+                            const staticTotal = ordersTotal + completedPlaysTotal + (session.customAmount || 0) + (session.priorUdhar || 0);
+                            return (
+                              <div
+                                key={session.id}
+                                onClick={() => { router.push(`/sessions/${session.id}`); setGlobalSearch(''); }}
+                                className="flex items-center justify-between bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-emerald-500/40 rounded-xl px-4 py-3 cursor-pointer transition-all duration-200 group"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <span className="w-1.5 h-8 rounded-full bg-emerald-400 shrink-0"></span>
+                                  <div className="min-w-0">
+                                    <p className="font-extrabold text-white text-sm truncate">{session.customerName}</p>
+                                    <p className="text-[10px] text-cyan-400 font-semibold font-mono truncate">{tableNames}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <span className="text-[10px] font-mono font-bold text-slate-400">
+                                    {new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  <span className="font-mono font-extrabold text-emerald-400 text-sm">₹{staticTotal.toFixed(0)}</span>
+                                  <Eye className="h-3.5 w-3.5 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Completed Sessions Section */}
+                    <div className="p-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="inline-block w-2 h-2 rounded-full bg-slate-400"></span>
+                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-mono">Completed Sessions</span>
+                        <span className="text-[10px] font-bold text-slate-500 font-mono">({matchedCompleted.length})</span>
+                      </div>
+                      {matchedCompleted.length === 0 ? (
+                        <p className="text-xs text-slate-600 font-semibold pl-4">No completed sessions match.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {matchedCompleted.map((session) => {
+                            const formatTime = (d: string | Date) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                            const formatDate = (d: string | Date) => new Date(d).toLocaleDateString([], { day: '2-digit', month: 'short' });
+                            return (
+                              <div
+                                key={session.id}
+                                onClick={() => { router.push(`/sessions/${session.id}`); setGlobalSearch(''); }}
+                                className="flex items-center justify-between bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 rounded-xl px-4 py-3 cursor-pointer transition-all duration-200 group"
+                              >
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <span className="w-1.5 h-8 rounded-full bg-slate-600 shrink-0"></span>
+                                  <div className="min-w-0">
+                                    <p className="font-extrabold text-white text-sm truncate">{session.customerName}</p>
+                                    <p className="text-[10px] text-slate-400 font-mono truncate">
+                                      {session.startTime && session.endTime
+                                        ? `${formatTime(session.startTime)} – ${formatTime(session.endTime)} · ${formatDate(session.endTime)}`
+                                        : 'Closed'}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0">
+                                  <span className="font-mono font-extrabold text-cyan-400 text-sm">₹{(session.totalBill || 0).toFixed(0)}</span>
+                                  <Eye className="h-3.5 w-3.5 text-slate-500 group-hover:text-cyan-400 transition-colors" />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+
         {/* Active Live Sessions Section */}
         <div>
           <h3 className="text-xs font-extrabold text-slate-400 mb-4 uppercase tracking-widest font-mono">Active Play Sessions</h3>
@@ -537,15 +758,79 @@ export default function DashboardPage() {
             </div>
           ) : activeSessions.length === 0 ? (
             <div className="text-center py-12 bg-[#111827]/60 rounded-2xl border border-slate-800 text-slate-400 font-semibold text-sm">
-              No active sessions running. Click <span className="text-cyan-400 font-bold">"Start Session"</span> to open a session.
+              No active sessions running. Click <span className="text-cyan-400 font-bold">&quot;Start Session&quot;</span> to open a session.
             </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {activeSessions.map((session) => (
-                <SessionCard key={session.id} session={session} />
-              ))}
-            </div>
-          )}
+          ) : (() => {
+            const playingSessions = activeSessions.filter((s) => s.tablePlays?.some((tp) => !tp.endTime));
+            const otherSessions = activeSessions.filter((s) => !s.tablePlays?.some((tp) => !tp.endTime));
+
+            return (
+              <div className="space-y-6">
+                {/* Playing Sessions */}
+                {playingSessions.length > 0 && (
+                  <div>
+                    {otherSessions.length > 0 && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 font-mono">
+                          Currently Playing ({playingSessions.length})
+                        </span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {playingSessions.map((session) => (
+                        <SessionCard
+                          key={session.id}
+                          session={session}
+                          onOrderAdded={fetchData}
+                          onAddItemsClick={(sid) => setActiveOrderSessionId(sid)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Separation Line between playing and other active sessions */}
+                {playingSessions.length > 0 && otherSessions.length > 0 && (
+                  <div className="relative my-8">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-slate-800"></div>
+                    </div>
+                    <div className="relative flex justify-center text-xs">
+                      <span className="bg-[#0a0d14] px-4 py-1 text-slate-400 font-mono font-bold uppercase tracking-wider rounded-full border border-slate-800 shadow-sm flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                        Other Active Sessions · In Lounge ({otherSessions.length})
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Other Active Sessions (not playing) */}
+                {otherSessions.length > 0 && (
+                  <div>
+                    {playingSessions.length === 0 && (
+                      <div className="flex items-center gap-2 mb-4">
+                        <span className="inline-block w-2.5 h-2.5 rounded-full bg-slate-400"></span>
+                        <span className="text-xs font-bold uppercase tracking-wider text-slate-400 font-mono">
+                          In Lounge ({otherSessions.length})
+                        </span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {otherSessions.map((session) => (
+                        <SessionCard
+                          key={session.id}
+                          session={session}
+                          onOrderAdded={fetchData}
+                          onAddItemsClick={(sid) => setActiveOrderSessionId(sid)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Two-Column Layout for Completed Sessions & Udhar Ledger */}
@@ -823,10 +1108,13 @@ export default function DashboardPage() {
       {/* Log Manual Udhar Modal */}
       {showAddUdhar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
-          <div className="bg-[#111827] rounded-3xl border border-slate-800 w-full max-w-md shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden p-6 space-y-6">
+          <div className="bg-[#111827] rounded-3xl border border-slate-800 w-full max-w-md shadow-[0_20px_50px_rgba(0,0,0,0.8)] p-6 space-y-5">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h2 className="text-lg font-extrabold text-white font-display uppercase tracking-wide">Log New Udhar</h2>
-              <button onClick={() => setShowAddUdhar(false)} className="text-slate-400 hover:text-white">
+              <div>
+                <h2 className="text-lg font-extrabold text-white font-display uppercase tracking-wide">Log New Udhar</h2>
+                <p className="text-[11px] text-slate-400 font-mono mt-0.5">Search customer or enter new name</p>
+              </div>
+              <button onClick={() => setShowAddUdhar(false)} className="text-slate-400 hover:text-white transition-colors">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -837,34 +1125,105 @@ export default function DashboardPage() {
               </div>
             )}
 
-            <form onSubmit={handleCreateUdhar} className="space-y-5">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 font-mono">
-                  Customer Name
+            <form onSubmit={handleCreateUdhar} className="space-y-4">
+              {/* Customer Name Search & Input */}
+              <div className="relative">
+                <label className="flex justify-between items-center text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 font-mono">
+                  <span>Customer Name <span className="text-cyan-400">*</span></span>
+                  {newUdharCustomer && udharSuggestions.length === 0 && (
+                    <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/80 px-1.5 py-0.5 rounded border border-emerald-500/40 uppercase">
+                      New Customer
+                    </span>
+                  )}
                 </label>
                 <input
                   type="text"
                   required
+                  autoFocus
+                  placeholder="Search existing customer (e.g. Ayush)..."
                   value={newUdharCustomer}
-                  onChange={(e) => setNewUdharCustomer(e.target.value)}
+                  onChange={(e) => {
+                    setNewUdharCustomer(e.target.value);
+                    setShowUdharSuggestions(true);
+                  }}
+                  onFocus={() => setShowUdharSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowUdharSuggestions(false), 200)}
                   className="block w-full rounded-xl bg-slate-900 border border-slate-800 px-3.5 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-semibold"
                 />
+
+                {/* Autocomplete Suggestions Dropdown */}
+                {showUdharSuggestions && udharSuggestions.length > 0 && (
+                  <ul className="absolute left-0 right-0 z-50 mt-1.5 bg-slate-900 border border-slate-700/80 rounded-2xl shadow-[0_15px_35px_rgba(0,0,0,0.9)] max-h-52 overflow-y-auto divide-y divide-slate-800">
+                    <div className="px-3.5 py-2 text-[10px] font-mono font-bold uppercase text-slate-400 bg-slate-950/90 flex justify-between items-center sticky top-0">
+                      <span>Matching Customers ({udharSuggestions.length})</span>
+                      <span className="text-[9px] text-cyan-400">Click to select</span>
+                    </div>
+                    {udharSuggestions.map((c, idx) => (
+                      <li
+                        key={idx}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setNewUdharCustomer(c.customerName);
+                          setShowUdharSuggestions(false);
+                        }}
+                        className="px-3.5 py-2.5 text-xs text-slate-200 hover:bg-slate-800 hover:text-cyan-300 cursor-pointer font-semibold flex justify-between items-center transition-colors"
+                      >
+                        <div className="flex flex-col min-w-0 pr-2">
+                          <span className="font-bold text-white truncate">{c.customerName}</span>
+                          {c.customerPhone && (
+                            <span className="text-[10px] font-mono text-slate-400 mt-0.5">
+                              📱 {c.customerPhone}
+                            </span>
+                          )}
+                        </div>
+                        {c.outstanding && c.outstanding > 0 ? (
+                          <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-500/40 shrink-0">
+                            Debt: ₹{c.outstanding.toFixed(2)}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-mono text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded-md border border-emerald-500/30 shrink-0">
+                            No Debt
+                          </span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
 
+              {/* Existing Debt Notice */}
+              {selectedCustomerUdhar && selectedCustomerUdhar.outstanding && selectedCustomerUdhar.outstanding > 0 && (
+                <div className="text-xs text-amber-300 bg-amber-950/60 p-3 rounded-xl border border-amber-500/40 leading-relaxed font-medium space-y-1">
+                  <div>
+                    ⚠️ <b>{selectedCustomerUdhar.customerName}</b> currently has an existing debt of{' '}
+                    <b className="font-mono text-amber-200">₹{selectedCustomerUdhar.outstanding.toFixed(2)}</b>.
+                  </div>
+                  {newUdharAmount && parseFloat(newUdharAmount) > 0 && (
+                    <div className="text-[11px] font-mono text-amber-200/90 pt-0.5 border-t border-amber-500/20">
+                      Total debt will increase to: <b>₹{(selectedCustomerUdhar.outstanding + parseFloat(newUdharAmount)).toFixed(2)}</b>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Outstanding Amount */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 font-mono">
-                  Outstanding Amount (₹)
+                  Outstanding Amount (₹) <span className="text-cyan-400">*</span>
                 </label>
                 <input
                   type="number"
                   step="0.01"
+                  min="0"
                   required
+                  placeholder="e.g. 500"
                   value={newUdharAmount}
                   onChange={(e) => setNewUdharAmount(e.target.value)}
                   className="block w-full rounded-xl bg-slate-900 border border-slate-800 px-3.5 py-2.5 text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-semibold font-mono"
                 />
               </div>
 
+              {/* Actions */}
               <div className="flex justify-end gap-3 pt-2 border-t border-slate-800/80">
                 <button
                   type="button"
@@ -979,6 +1338,18 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Quick Add Items Modal */}
+      {activeOrderSessionId && (
+        <AddOrderModal
+          sessionId={activeOrderSessionId}
+          onClose={() => setActiveOrderSessionId(null)}
+          onSuccess={() => {
+            setActiveOrderSessionId(null);
+            fetchData();
+          }}
+        />
       )}
 
     </div>

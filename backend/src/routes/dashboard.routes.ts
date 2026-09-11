@@ -25,7 +25,8 @@ router.get('/', authenticateToken, async (req, res) => {
           payments: true,
           tablePlays: {
             include: { table: true }
-          }
+          },
+          udhars: true
         }
       }),
       prisma.session.findMany({
@@ -61,21 +62,37 @@ router.get('/', authenticateToken, async (req, res) => {
     const udharOutstanding = unpaidUdhars.reduce((sum, u) => sum + u.amount, 0);
 
     // Batch query for prior udhars of all active sessions to eliminate N+1 queries
-    const activeCustomerNames = activeSessions.map(s => s.customerName.trim());
+    const activeCustomerNames = activeSessions.map(s => s.customerName.trim()).filter(Boolean);
+    const activeCustomerPhones = activeSessions.map(s => s.customerPhone?.trim()).filter(Boolean) as string[];
     
-    const allPriorUdhars = activeCustomerNames.length > 0 ? await prisma.udhar.findMany({
+    const orConditions: any[] = [];
+    if (activeCustomerNames.length > 0) {
+      orConditions.push({ customerName: { in: activeCustomerNames, mode: 'insensitive' } });
+    }
+    if (activeCustomerPhones.length > 0) {
+      orConditions.push({ session: { customerPhone: { in: activeCustomerPhones } } });
+    }
+
+    const allPriorUdhars = orConditions.length > 0 ? await prisma.udhar.findMany({
       where: {
-        customerName: { in: activeCustomerNames, mode: 'insensitive' },
-        status: 'unpaid'
-      }
+        status: 'unpaid',
+        OR: orConditions
+      },
+      include: { session: true }
     }) : [];
 
-    // Group the unpaid prior udhars by customer name in-memory
+    // Group the unpaid prior udhars by customer name or phone in-memory
     const activeSessionsWithUdhar = activeSessions.map((s) => {
       const trimmedCustomerName = s.customerName.trim().toLowerCase();
+      const customerPhone = s.customerPhone?.trim();
       
       const priorUdhar = allPriorUdhars
-        .filter(u => u.customerName.trim().toLowerCase() === trimmedCustomerName && u.sessionId !== s.id)
+        .filter(u => {
+          if (u.sessionId === s.id) return false;
+          const nameMatches = u.customerName.trim().toLowerCase() === trimmedCustomerName;
+          const phoneMatches = customerPhone && u.session?.customerPhone && u.session.customerPhone === customerPhone;
+          return nameMatches || phoneMatches;
+        })
         .reduce((sum, u) => sum + u.amount, 0);
 
       return {

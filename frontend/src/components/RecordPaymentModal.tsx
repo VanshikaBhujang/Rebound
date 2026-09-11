@@ -49,8 +49,8 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
       <div className="bg-[#111827] rounded-3xl border border-slate-800 w-full max-w-md shadow-[0_20px_50px_rgba(0,0,0,0.8)] overflow-hidden p-6 space-y-6">
         <div className="flex justify-between items-center border-b border-slate-800 pb-3">
           <div>
-            <h2 className="text-lg font-extrabold text-white font-display uppercase tracking-wide">Record Advance / Payment</h2>
-            <p className="text-[11px] text-emerald-400 font-mono mt-0.5 font-semibold">💳 Advance will be automatically deducted from final bill</p>
+            <h2 className="text-lg font-extrabold text-white font-display uppercase tracking-wide">Advance or Partial Payment</h2>
+            <p className="text-[11px] text-emerald-400 font-mono mt-0.5 font-semibold">💳 Amount will be automatically adjusted against the total bill</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white">
             <X className="h-5 w-5" />
@@ -66,7 +66,7 @@ export const RecordPaymentModal: React.FC<RecordPaymentModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5 font-mono">
-              Advance / Payment Amount (₹)
+              Advance or Partial Amount (₹)
             </label>
             <input
               type="number"

@@ -46,6 +46,22 @@ export const api = {
     });
     return handleResponse(res);
   },
+  put: async (endpoint: string, body: any) => {
+    const res = await fetch(`${API_URL}${endpoint}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(body)
+    });
+    return handleResponse(res);
+  },
+  patch: async (endpoint: string, body: any) => {
+    const res = await fetch(`${API_URL}${endpoint}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(body)
+    });
+    return handleResponse(res);
+  },
   delete: async (endpoint: string) => {
     const res = await fetch(`${API_URL}${endpoint}`, {
       method: 'DELETE',

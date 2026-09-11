@@ -2,15 +2,17 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { LogOut, User, Settings, Moon, PlusCircle, Grid, Gamepad2, Shield } from 'lucide-react';
+import { LogOut, User, Settings, Moon, PlusCircle, Grid, Gamepad2, Shield, Users } from 'lucide-react';
 import { AddItemsModal } from './AddItemsModal';
 import { AddTablesModal } from './AddTablesModal';
+import { CustomerManagerModal } from './CustomerManagerModal';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
   const [showAddItems, setShowAddItems] = useState(false);
   const [showAddTables, setShowAddTables] = useState(false);
+  const [showCustomers, setShowCustomers] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -97,6 +99,16 @@ export const Navbar: React.FC = () => {
                       Add Billiard Tables
                     </button>
 
+                    <button 
+                      onClick={() => { setShowCustomers(true); setShowSettings(false); }}
+                      className="w-full text-left px-4 py-2.5 text-xs font-semibold text-slate-300 hover:bg-cyan-950/40 hover:text-cyan-300 flex items-center transition-all group"
+                    >
+                      <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 mr-3 group-hover:bg-cyan-500/20 group-hover:text-cyan-300 transition-colors">
+                        <Users className="h-4 w-4" />
+                      </div>
+                      Rebound Customers
+                    </button>
+
                     <div className="h-px bg-slate-800/80 my-1.5 mx-3" />
 
                     <button 
@@ -134,6 +146,12 @@ export const Navbar: React.FC = () => {
             setShowAddTables(false);
             window.location.reload();
           }} 
+        />
+      )}
+
+      {showCustomers && (
+        <CustomerManagerModal 
+          onClose={() => setShowCustomers(false)} 
         />
       )}
     </>

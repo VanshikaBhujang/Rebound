@@ -134,3 +134,16 @@ model TablePlay {
   @@index([sessionId])
   @@index([tableId])
 }
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  firstName String
+  lastName  String   @default("")
+  name      String   // Full combined name "firstName lastName"
+  phone     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone])
+  @@index([name])
+}

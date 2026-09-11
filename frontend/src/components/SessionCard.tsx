@@ -3,10 +3,13 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Session } from '../types';
-import { PlayCircle, Clock, Eye, Gamepad2, Coffee, CheckCircle2, User, AlertCircle, Sparkles } from 'lucide-react';
+import { PlayCircle, Clock, Eye, Gamepad2, Coffee, CheckCircle2, User, Phone, AlertCircle, Sparkles, Plus } from 'lucide-react';
+import { AddOrderModal } from './AddOrderModal';
 
 interface SessionCardProps {
   session: Session;
+  onOrderAdded?: () => void;
+  onAddItemsClick?: (sessionId: string) => void;
 }
 
 const GAME_LABELS: Record<string, string> = {
@@ -23,10 +26,11 @@ const GAME_RATES: Record<string, number> = {
   'None': 0,
 };
 
-export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
+export const SessionCard: React.FC<SessionCardProps> = ({ session, onOrderAdded, onAddItemsClick }) => {
   const [sessionElapsed, setSessionElapsed] = useState('');
   const [activePlayElapsed, setActivePlayElapsed] = useState('');
   const [liveGameCost, setLiveGameCost] = useState(0);
+  const [showAddOrder, setShowAddOrder] = useState(false);
 
   // Find active table play (if any)
   const activePlay = session.tablePlays?.find((tp) => !tp.endTime);
@@ -76,7 +80,11 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
   // Calculate billing totals
   const ordersTotal = session.orders?.reduce((sum, o) => sum + o.quantity * o.price, 0) || 0;
   const completedPlaysTotal = session.tablePlays?.filter((tp) => tp.endTime).reduce((sum, tp) => sum + tp.cost, 0) || 0;
-  const totalAmount = ordersTotal + completedPlaysTotal + (session.customAmount || 0) + (session.priorUdhar || 0);
+  const grossBill = ordersTotal + completedPlaysTotal + (session.customAmount || 0) + (session.priorUdhar || 0);
+  const paymentsTotal = session.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+  const netDue = Math.max(0, grossBill - paymentsTotal);
+  const advanceCredit = Math.max(0, paymentsTotal - grossBill);
+  const remainingPriorUdhar = Math.min(session.priorUdhar || 0, netDue);
 
   const ordersCount = session.orders?.reduce((sum, o) => sum + o.quantity, 0) || 0;
   const isInClub = session.status === 'active';
@@ -113,19 +121,25 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
           </div>
         </div>
 
-        {/* Customer Name */}
-        <div className="flex items-center justify-between">
+        {/* Customer Name & Phone */}
+        <div className="flex flex-col">
           <h3 className="text-lg font-extrabold text-white flex items-center gap-2 font-display tracking-tight">
             <User className="h-4 w-4 text-cyan-400 shrink-0" />
-            {session.customerName}
+            <span>{session.customerName}</span>
           </h3>
+          {session.customerPhone && (
+            <p className="text-xs font-mono font-semibold text-slate-400 flex items-center gap-1.5 mt-0.5 ml-6">
+              <Phone className="h-3 w-3 text-cyan-400/80 shrink-0" />
+              <span>{session.customerPhone}</span>
+            </p>
+          )}
         </div>
 
-        {/* Prior Udhar Alert */}
-        {session.priorUdhar && session.priorUdhar > 0 ? (
+        {/* Prior Udhar Alert - Only show if there is actually unpaid prior udhar remaining after payments */}
+        {remainingPriorUdhar > 0 ? (
           <div className="text-xs font-bold text-rose-300 bg-rose-950/60 border border-rose-500/40 px-3 py-1.5 rounded-xl animate-pulse flex items-center gap-1.5">
             <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
-            <span>Prior Udhar: ₹{session.priorUdhar}</span>
+            <span>Prior Udhar: ₹{remainingPriorUdhar}</span>
           </div>
         ) : null}
 
@@ -147,11 +161,41 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
 
       {/* Middle Billing Bar */}
       <div className="pt-3 flex justify-between items-end border-t border-slate-800/80">
-        <div className="space-y-1">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">Current Bill</span>
-          <div className="text-2xl font-black text-white tracking-tight glow-text-cyan">
-            ₹{totalAmount.toFixed(2)}
-          </div>
+        <div className="space-y-0.5">
+          {advanceCredit > 0 ? (
+            <>
+              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest font-mono">
+                Advance Balance
+              </span>
+              <div className="text-2xl font-black text-emerald-400 tracking-tight glow-text-emerald">
+                ₹{advanceCredit.toFixed(2)}
+              </div>
+              <p className="text-[10px] text-slate-400 font-mono">
+                Bill ₹{grossBill.toFixed(0)} · Adv ₹{paymentsTotal.toFixed(0)}
+              </p>
+            </>
+          ) : paymentsTotal > 0 ? (
+            <>
+              <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest font-mono">
+                Payable Due
+              </span>
+              <div className="text-2xl font-black text-white tracking-tight glow-text-cyan">
+                ₹{netDue.toFixed(2)}
+              </div>
+              <p className="text-[10px] text-emerald-400 font-mono">
+                Paid: ₹{paymentsTotal.toFixed(0)} of ₹{grossBill.toFixed(0)}
+              </p>
+            </>
+          ) : (
+            <>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest font-mono">
+                Current Bill
+              </span>
+              <div className="text-2xl font-black text-white tracking-tight glow-text-cyan">
+                ₹{grossBill.toFixed(2)}
+              </div>
+            </>
+          )}
         </div>
 
         <div className="text-right text-xs text-slate-400 font-medium space-y-1">
@@ -163,16 +207,51 @@ export const SessionCard: React.FC<SessionCardProps> = ({ session }) => {
         </div>
       </div>
 
-      {/* Action Button */}
-      <div className="pt-1">
+      {/* Action Buttons: 3/4 View Live Session + 1/4 Add Items Plus Button */}
+      <div className="pt-1 flex items-center gap-2">
         <Link
           href={`/sessions/${session.id}`}
-          className="w-full inline-flex justify-center items-center px-4 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-cyan-300 bg-slate-900 border border-slate-700/80 hover:bg-cyan-950/40 hover:border-cyan-500/50 hover:text-white transition-all duration-300 custom-button shadow-md"
+          className={`inline-flex justify-center items-center px-3 py-2.5 rounded-xl text-xs font-extrabold uppercase tracking-wider text-cyan-300 bg-slate-900 border border-slate-700/80 hover:bg-cyan-950/40 hover:border-cyan-500/50 hover:text-white transition-all duration-300 custom-button shadow-md truncate ${
+            isInClub ? 'flex-[3]' : 'w-full'
+          }`}
         >
-          <Eye className="h-4 w-4 mr-2 text-cyan-400" />
-          View Live Session
+          <Eye className="h-4 w-4 mr-2 text-cyan-400 shrink-0" />
+          <span className="truncate">View Live Session</span>
         </Link>
+
+        {isInClub && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (onAddItemsClick) {
+                onAddItemsClick(session.id);
+              } else {
+                setShowAddOrder(true);
+              }
+            }}
+            title="Add Items / Place Order"
+            className="flex-1 inline-flex justify-center items-center py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 shadow-[0_0_15px_rgba(0,242,254,0.3)] hover:shadow-[0_0_20px_rgba(0,242,254,0.5)] transition-all duration-300 custom-button cursor-pointer shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+        )}
       </div>
+
+      {/* Add Items Popup Modal */}
+      {showAddOrder && (
+        <AddOrderModal
+          sessionId={session.id}
+          onClose={() => setShowAddOrder(false)}
+          onSuccess={() => {
+            setShowAddOrder(false);
+            if (onOrderAdded) {
+              onOrderAdded();
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

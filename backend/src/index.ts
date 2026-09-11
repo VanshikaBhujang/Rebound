@@ -15,7 +15,16 @@ import paymentRoutes from './routes/payment.routes';
 import tableBookingRoutes from './routes/tableBooking.routes';
 import udharRoutes from './routes/udhar.routes';
 import tableRoutes from './routes/table.routes';
+import customerRoutes from './routes/customer.routes';
 
+// Load .env.local first (dev overrides), then fallback to .env (prod defaults)
+dotenv.config({ path: '.env.local', override: true });
+if (process.env.DATABASE_URL?.includes('<your-dev-project>')) {
+  delete process.env.DATABASE_URL;
+}
+if (process.env.DIRECT_URL?.includes('<your-dev-project>')) {
+  delete process.env.DIRECT_URL;
+}
 dotenv.config();
 
 const app = express();
@@ -39,17 +48,23 @@ export const prisma = prismaClient.$extends({
 const allowedOrigins = [
   'https://rebound-taupe-theta.vercel.app',  // production frontend
   process.env.FRONTEND_URL,                   // from Render env var
-  'http://localhost:3000',                    // local dev
 ].filter(Boolean) as string[];
 
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, etc.)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked for origin: ${origin}`));
+    if (!origin) {
+      return callback(null, true);
     }
+    // Allow any localhost port for local development
+    if (/^http:\/\/localhost:\d+$/.test(origin)) {
+      return callback(null, true);
+    }
+    // Allow known production origins
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error(`CORS blocked for origin: ${origin}`));
   },
   credentials: true,
 }));
@@ -65,6 +80,7 @@ app.use('/api/payments', paymentRoutes);
 app.use('/api/bookings', tableBookingRoutes);
 app.use('/api/udhar', udharRoutes);
 app.use('/api/tables', tableRoutes);
+app.use('/api/customers', customerRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

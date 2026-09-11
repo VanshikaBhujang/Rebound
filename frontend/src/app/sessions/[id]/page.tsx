@@ -14,10 +14,12 @@ import { CloseSessionModal } from '../../../components/CloseSessionModal';
 import {
   ArrowLeft,
   Clock,
+  Calendar,
   CreditCard,
   CheckCircle,
   Trash2,
   User,
+  Phone,
   AlertCircle,
   ShoppingBag,
   Cigarette,
@@ -30,6 +32,22 @@ import {
   Printer,
   MessageCircle,
 } from 'lucide-react';
+
+const dateToTimeInput = (date: Date = new Date()): string => {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
+
+const timeToDate = (timeStr: string, referenceDate: Date = new Date()): Date => {
+  if (!timeStr) return new Date();
+  const [h, m] = timeStr.split(':').map(Number);
+  const d = new Date(referenceDate);
+  d.setHours(h, m, 0, 0);
+  if (d.getTime() > Date.now() + 30 * 60000) {
+    d.setDate(d.getDate() - 1);
+  }
+  return d;
+};
 
 const GAME_RATES: Record<string, number> = {
   Pool: 160,
@@ -96,9 +114,9 @@ const CategorySection: React.FC<CategorySectionProps> = ({
   if (orders.length === 0) return null;
 
   return (
-    <div className="bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 shadow-[0_10px_30px_rgba(0,0,0,0.5)] overflow-hidden">
+    <div className="bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
       {/* Header */}
-      <div className={`flex items-center justify-between px-5 py-3.5 border-b border-slate-800 ${accentClass}`}>
+      <div className={`flex items-center justify-between px-5 py-3.5 border-b border-slate-800 rounded-t-2xl ${accentClass}`}>
 
         <div className="flex items-center gap-2 font-semibold text-sm">
           {icon}
@@ -115,7 +133,7 @@ const CategorySection: React.FC<CategorySectionProps> = ({
         {groupedOrders.map((group) => {
           const hasMultiple = group.items.length > 1;
           return (
-            <div key={group.menuItemId} className="flex items-center justify-between px-5 py-3.5 text-sm hover:bg-slate-900/60 transition-colors">
+            <div key={group.menuItemId} className="flex items-center justify-between px-5 py-3.5 text-sm hover:bg-slate-900/60 transition-colors last:rounded-b-2xl">
               <div className="flex-1 min-w-0">
                 <div className="relative group inline-flex items-center gap-2">
                   <span className="font-bold text-white cursor-help">{group.name}</span>
@@ -128,7 +146,7 @@ const CategorySection: React.FC<CategorySectionProps> = ({
                   </span>
 
                   {/* Timeline Hover Popover Wrapper (bridges the hover gap) */}
-                  <div className="absolute left-0 bottom-full pb-2 hidden group-hover:block z-30">
+                  <div className="absolute left-0 bottom-full pb-2 hidden group-hover:block z-50">
                     <div className="bg-[#0e131f] text-white text-xs rounded-xl p-3 shadow-2xl w-60 space-y-2 border border-slate-700 cursor-default relative">
                       <p className="font-extrabold text-[9px] text-cyan-400 border-b border-slate-800 pb-1.5 uppercase tracking-wider font-mono">
                         Order Timeline
@@ -196,9 +214,9 @@ const TablePlaySection: React.FC<TablePlaySectionProps> = ({
   const totalCost = completedPlaysTotal;
 
   return (
-    <div className="bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 shadow-[0_10px_30px_rgba(0,0,0,0.5)] overflow-hidden">
+    <div className="bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 shadow-[0_10px_30px_rgba(0,0,0,0.5)]">
       {/* Header */}
-      <div className="flex items-center justify-between px-5 py-3.5 bg-purple-950/40 text-purple-300 border-b border-purple-500/30">
+      <div className="flex items-center justify-between px-5 py-3.5 bg-purple-950/40 text-purple-300 border-b border-purple-500/30 rounded-t-2xl">
         <div className="flex items-center gap-2 font-semibold text-sm">
           <Gamepad2 className="h-4 w-4 text-purple-400" />
           <span>Table & Game Play History</span>
@@ -234,7 +252,7 @@ const TablePlaySection: React.FC<TablePlaySectionProps> = ({
             : `${tp.gameType}${tp.table ? ` (Table ${tp.table.number})` : ''}`;
 
           return (
-            <div key={tp.id} className="flex items-center justify-between px-5 py-3.5 text-sm hover:bg-slate-900/60 transition-colors">
+            <div key={tp.id} className="flex items-center justify-between px-5 py-3.5 text-sm hover:bg-slate-900/60 transition-colors last:rounded-b-2xl">
               <div className="flex-1 min-w-0">
                 <div className="relative group inline-flex items-center gap-2 flex-wrap">
                   <span className="font-bold text-white cursor-help">{label}</span>
@@ -255,7 +273,7 @@ const TablePlaySection: React.FC<TablePlaySectionProps> = ({
                   )}
 
                   {/* Timeline Hover Popover Wrapper */}
-                  <div className="absolute left-0 bottom-full pb-2 hidden group-hover:block z-30">
+                  <div className="absolute left-0 bottom-full pb-2 hidden group-hover:block z-50">
                     <div className="bg-[#0e131f] text-white text-xs rounded-xl p-3 shadow-2xl w-60 space-y-2 border border-slate-700 cursor-default relative">
                       <p className="font-extrabold text-[9px] text-purple-400 border-b border-slate-800 pb-1.5 uppercase tracking-wider font-mono">
                         Play Timeline
@@ -347,6 +365,11 @@ export default function SessionDetailsPage() {
   const [playTableId, setPlayTableId] = useState('');
   const [playPlayerCount, setPlayPlayerCount] = useState('1');
   const [playLoading, setPlayLoading] = useState(false);
+  const [startTimeStr, setStartTimeStr] = useState(() => dateToTimeInput());
+  const [endTimeStr, setEndTimeStr] = useState('');
+  const [showEndField, setShowEndField] = useState(false);
+  const [stopPlayTarget, setStopPlayTarget] = useState<TablePlay | null>(null);
+  const [stopPlayTimeStr, setStopPlayTimeStr] = useState(() => dateToTimeInput());
 
   // Live timers — initialize immediately from session data to avoid blank flash
   const [elapsed, setElapsed] = useState(() => {
@@ -387,7 +410,9 @@ export default function SessionDetailsPage() {
     if (
       message.type?.startsWith('SESSION_') || 
       message.type?.startsWith('TABLE_PLAY_') ||
-      message.type?.startsWith('ORDER_')
+      message.type?.startsWith('ORDER_') ||
+      message.type?.startsWith('PAYMENT_') ||
+      message.type?.startsWith('UDHAR_')
     ) {
       fetchSessionDebounced();
     }
@@ -472,33 +497,50 @@ export default function SessionDetailsPage() {
       alert('Please select a billiard table');
       return;
     }
+
+    const startDate = timeToDate(startTimeStr);
+    const parsedStartISO = startDate.toISOString();
+    let parsedEndISO: string | undefined = undefined;
+
+    if (showEndField && endTimeStr) {
+      const endDate = timeToDate(endTimeStr);
+      if (endDate.getTime() <= startDate.getTime()) {
+        alert('End time must be after start time');
+        return;
+      }
+      parsedEndISO = endDate.toISOString();
+    }
+
     setPlayLoading(true);
 
     const currentTableId = playTableId ? parseInt(playTableId) : null;
     const resolvedPlayerCount = playGameType === 'PS4' ? parseInt(playPlayerCount) : 1;
     
-    const optimisticPlay: TablePlay = {
-      id: Date.now(),
-      sessionId,
-      tableId: currentTableId,
-      table: currentTableId ? tables.find(t => t.id === currentTableId) : undefined,
-      gameType: playGameType,
-      playerCount: resolvedPlayerCount,
-      startTime: new Date().toISOString(),
-      endTime: undefined,
-      cost: 0,
-      createdBy: user.username
-    };
+    // Only perform optimistic live update if not adding an already-completed play
+    if (!parsedEndISO) {
+      const optimisticPlay: TablePlay = {
+        id: Date.now(),
+        sessionId,
+        tableId: currentTableId,
+        table: currentTableId ? tables.find(t => t.id === currentTableId) : undefined,
+        gameType: playGameType,
+        playerCount: resolvedPlayerCount,
+        startTime: parsedStartISO,
+        endTime: undefined,
+        cost: 0,
+        createdBy: user.username
+      };
 
-    const updatedTablePlays = [...(session.tablePlays || []), optimisticPlay];
-    
-    mutate({
-      ...session,
-      tableId: currentTableId,
-      gameType: playGameType,
-      playerCount: resolvedPlayerCount,
-      tablePlays: updatedTablePlays
-    }, false);
+      const updatedTablePlays = [...(session.tablePlays || []), optimisticPlay];
+      
+      mutate({
+        ...session,
+        tableId: currentTableId,
+        gameType: playGameType,
+        playerCount: resolvedPlayerCount,
+        tablePlays: updatedTablePlays
+      }, false);
+    }
 
     try {
       await api.post(`/sessions/${sessionId}/table/start`, {
@@ -506,12 +548,17 @@ export default function SessionDetailsPage() {
         tableId: playTableId ? parseInt(playTableId) : null,
         playerCount: playGameType === 'PS4' ? parseInt(playPlayerCount) : 1,
         staffUsername: user.username,
+        startTime: parsedStartISO,
+        endTime: parsedEndISO,
       });
       mutate();
       mutateTables();
       setPlayGameType('Pool');
       setPlayTableId('');
       setPlayPlayerCount('1');
+      setStartTimeStr(dateToTimeInput());
+      setEndTimeStr('');
+      setShowEndField(false);
     } catch (err: any) {
       alert(err.message || 'Failed to start table play');
       mutate();
@@ -521,7 +568,7 @@ export default function SessionDetailsPage() {
     }
   };
 
-  const handleEndTablePlay = async (targetPlayId?: number) => {
+  const handleEndTablePlay = (targetPlayId?: number) => {
     if (!session) return;
     const activePlays = session.tablePlays?.filter((tp) => !tp.endTime) || [];
     const targetPlay = targetPlayId
@@ -530,24 +577,33 @@ export default function SessionDetailsPage() {
 
     if (!targetPlay) return;
 
-    const label = targetPlay.gameType === 'PS4'
-      ? `PS4 (${targetPlay.playerCount} Player${targetPlay.playerCount > 1 ? 's' : ''})`
-      : `${targetPlay.gameType}${targetPlay.table ? ` (Table ${targetPlay.table.number})` : ''}`;
+    setStopPlayTarget(targetPlay);
+    setStopPlayTimeStr(dateToTimeInput());
+  };
 
-    if (!confirm(`End play for ${label} and calculate cost?`)) return;
+  const confirmEndTablePlay = async () => {
+    if (!session || !stopPlayTarget) return;
+
+    const endDate = timeToDate(stopPlayTimeStr);
+    const endMs = endDate.getTime();
+    const startMs = new Date(stopPlayTarget.startTime).getTime();
+    if (isNaN(endMs) || endMs <= startMs) {
+      alert('End time must be after start time');
+      return;
+    }
 
     setPlayLoading(true);
 
-    const endTimeStr = new Date().toISOString();
-    const elapsedMs = Date.now() - new Date(targetPlay.startTime).getTime();
+    const endTimeISO = endDate.toISOString();
+    const elapsedMs = endMs - startMs;
     const elapsedHours = elapsedMs / 3600000;
-    const rate = GAME_RATES[targetPlay.gameType] || 0;
-    const calculatedCost = Math.round(targetPlay.gameType === 'PS4'
-      ? rate * targetPlay.playerCount * elapsedHours
+    const rate = GAME_RATES[stopPlayTarget.gameType] || 0;
+    const calculatedCost = Math.round(stopPlayTarget.gameType === 'PS4'
+      ? rate * stopPlayTarget.playerCount * elapsedHours
       : rate * elapsedHours);
 
     const updatedTablePlays = session.tablePlays?.map(tp => 
-      tp.id === targetPlay.id ? { ...tp, endTime: endTimeStr, cost: calculatedCost } : tp
+      tp.id === stopPlayTarget.id ? { ...tp, endTime: endTimeISO, cost: calculatedCost } : tp
     ) || [];
 
     mutate({
@@ -557,7 +613,11 @@ export default function SessionDetailsPage() {
     }, false);
 
     try {
-      await api.post(`/sessions/${sessionId}/table/end`, { tablePlayId: targetPlay.id });
+      await api.post(`/sessions/${sessionId}/table/end`, {
+        tablePlayId: stopPlayTarget.id,
+        endTime: endTimeISO,
+      });
+      setStopPlayTarget(null);
       mutate();
       mutateTables();
     } catch (err: any) {
@@ -589,18 +649,39 @@ export default function SessionDetailsPage() {
     }
   };
 
-  if (authLoading || !user) {
+  if (authLoading || (!user && !sessionError)) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f7fa]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1a1a2e]"></div>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0d14]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyan-400"></div>
+      </div>
+    );
+  }
+
+  if (sessionError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#0a0d14] text-white p-6 space-y-4">
+        <div className="bg-[#111827] border border-slate-800 rounded-3xl p-8 max-w-md w-full text-center space-y-4 shadow-2xl">
+          <AlertCircle className="h-12 w-12 text-rose-400 mx-auto" />
+          <h2 className="text-xl font-extrabold font-display">Session Not Found</h2>
+          <p className="text-sm text-slate-400">
+            {sessionError.message || 'Unable to load details for this session. It may have been removed or database connection failed.'}
+          </p>
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-xs font-extrabold uppercase tracking-wider rounded-xl text-white transition-all shadow-[0_0_15px_rgba(0,242,254,0.3)]"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </button>
+        </div>
       </div>
     );
   }
 
   if (loading || !session) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f5f7fa]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#1a1a2e]"></div>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0d14]">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-cyan-400"></div>
       </div>
     );
   }
@@ -625,31 +706,13 @@ export default function SessionDetailsPage() {
   const priorOutstanding = session.priorUdhar || 0;
   const amountPaid = paymentsTotal;
 
-  const todayOutstanding = session.status === 'completed'
-    ? (session.udhars?.filter(u => u.status === 'unpaid').reduce((s, u) => s + u.amount, 0) || 0)
-    : Math.max(0, todaysTotal - amountPaid);
-
-  const paymentAppliedToToday = Math.max(0, todaysTotal - todayOutstanding);
-  const paymentAppliedToPrior = Math.max(0, amountPaid - paymentAppliedToToday);
-
-  const originalPriorOutstanding = session.status === 'completed'
-    ? priorOutstanding + paymentAppliedToPrior
-    : priorOutstanding;
-
-  const remainingPriorOutstanding = session.status === 'completed'
-    ? priorOutstanding
-    : Math.max(0, priorOutstanding - amountPaid);
-
-  const totalPayable = todaysTotal + originalPriorOutstanding;
-  
-  const ledgerSettledAmount = session.status === 'completed'
-    ? (session.udhars?.filter(u => u.status === 'paid').reduce((s, u) => s + u.amount, 0) || 0)
-    : 0;
-
-  const netOutstanding = Math.max(0, totalPayable - amountPaid - ledgerSettledAmount);
-
+  const totalPayable = todaysTotal + priorOutstanding;
+  const netDue = Math.max(0, totalPayable - amountPaid);
   const displayTotal = totalPayable;
-  const netDue = netOutstanding;
+  const netOutstanding = netDue;
+  const originalPriorOutstanding = priorOutstanding;
+  const remainingPriorOutstanding = Math.min(priorOutstanding, netDue);
+  const todayOutstanding = Math.max(0, todaysTotal - amountPaid);
 
   const isActive = session.status === 'active';
   const hasOrders =
@@ -731,6 +794,7 @@ export default function SessionDetailsPage() {
         <div class="divider"></div>
         <div class="flex-row"><span>Date:</span> <span>${new Date(session.startTime).toLocaleDateString()} ${new Date(session.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
         <div class="flex-row"><span>Customer:</span> <span>${session.customerName}</span></div>
+        ${session.customerPhone ? `<div class="flex-row"><span>Phone:</span> <span>${session.customerPhone}</span></div>` : ''}
         <div class="flex-row"><span>Session ID:</span> <span>${session.id}</span></div>
         <div class="divider"></div>
         
@@ -918,8 +982,14 @@ export default function SessionDetailsPage() {
               <span className="text-[10px] text-cyan-400 font-extrabold uppercase tracking-widest font-mono">Customer</span>
               <h1 className="text-2xl font-extrabold text-white mt-1 flex items-center gap-2 font-display tracking-tight">
                 <User className="h-5 w-5 text-cyan-400 shrink-0" />
-                {session.customerName}
+                <span>{session.customerName}</span>
               </h1>
+              {session.customerPhone && (
+                <p className="text-xs font-mono font-semibold text-slate-400 flex items-center gap-1.5 mt-1 ml-0.5">
+                  <Phone className="h-3.5 w-3.5 text-cyan-400 shrink-0" />
+                  <span>{session.customerPhone}</span>
+                </p>
+              )}
             </div>
 
             {/* Overall Status */}
@@ -1011,83 +1081,182 @@ export default function SessionDetailsPage() {
                   )}
 
                   {/* Start / Add Table Play Inline Form */}
-                  <form onSubmit={handleStartTablePlay} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end bg-slate-900/90 p-4 rounded-xl border border-slate-800">
-                    {/* 1. Game Type */}
-                <div>
-                  <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1 font-mono">Game Type</label>
-                  <select
-                    value={playGameType}
-                    onChange={(e) => {
-                      setPlayGameType(e.target.value);
-                      setPlayTableId('');
-                    }}
-                    className="block w-full rounded-xl border border-slate-800 px-3 py-2 text-white bg-slate-900 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-semibold"
-                  >
-                    <option value="Pool">Pool (₹160/hr)</option>
-                    <option value="MidSnooker">Mid Snooker (₹220/hr)</option>
-                    <option value="PS4">PS4 (₹80/person/hr)</option>
-                  </select>
-                </div>
+                  <form onSubmit={handleStartTablePlay} className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
+                      {/* 1. Game Type */}
+                      <div>
+                        <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1 font-mono">Game Type</label>
+                        <select
+                          value={playGameType}
+                          onChange={(e) => {
+                            setPlayGameType(e.target.value);
+                            setPlayTableId('');
+                          }}
+                          className="block w-full rounded-xl border border-slate-800 px-3 py-2 text-white bg-slate-900 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-semibold"
+                        >
+                          <option value="Pool">Pool (₹160/hr)</option>
+                          <option value="MidSnooker">Mid Snooker (₹220/hr)</option>
+                          <option value="PS4">PS4 (₹80/p/hr)</option>
+                        </select>
+                      </div>
 
-                {/* 2. Select table or players */}
-                {(playGameType === 'Pool' || playGameType === 'MidSnooker') ? (
-                  <div>
-                    <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1 font-mono">Select Table</label>
-                    <select
-                      value={playTableId}
-                      required
-                      onChange={(e) => setPlayTableId(e.target.value)}
-                      className="block w-full rounded-xl border border-slate-800 px-3 py-2 text-white bg-slate-900 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-semibold"
-                    >
-                      <option value="">-- Select Table --</option>
-                      {availableTables.map((t) => (
-                        <option key={t.id} value={t.id.toString()}>
-                          Table {t.number}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1 font-mono">Players</label>
-                    <div className="flex gap-2">
-                      {['1', '2', '3', '4'].map((n) => (
+                      {/* 2. Select table or players */}
+                      {(playGameType === 'Pool' || playGameType === 'MidSnooker') ? (
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1 font-mono">Select Table</label>
+                          <select
+                            value={playTableId}
+                            required
+                            onChange={(e) => setPlayTableId(e.target.value)}
+                            className="block w-full rounded-xl border border-slate-800 px-3 py-2 text-white bg-slate-900 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-semibold"
+                          >
+                            <option value="">-- Select Table --</option>
+                            {availableTables.map((t) => (
+                              <option key={t.id} value={t.id.toString()}>
+                                Table {t.number}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest mb-1 font-mono">Players</label>
+                          <div className="flex gap-1.5">
+                            {['1', '2', '3', '4'].map((n) => (
+                              <button
+                                key={n}
+                                type="button"
+                                onClick={() => setPlayPlayerCount(n)}
+                                className={`flex-1 py-2 rounded-xl border text-xs font-extrabold transition-all ${
+                                  playPlayerCount === n
+                                    ? 'border-cyan-500 bg-cyan-500/20 text-cyan-300'
+                                    : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                                }`}
+                              >
+                                {n}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 3. Start Time with quick presets */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono">
+                            {showEndField ? 'Start / End Time' : 'Start Time'}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowEndField(!showEndField);
+                              if (showEndField) setEndTimeStr('');
+                            }}
+                            className="text-[10px] font-mono text-cyan-400 hover:underline"
+                          >
+                            {showEndField ? 'Live Play' : '+ End Time'}
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            type="time"
+                            value={startTimeStr}
+                            onChange={(e) => setStartTimeStr(e.target.value)}
+                            className="block w-full rounded-xl border border-slate-800 px-3 py-2 text-white bg-slate-900 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 text-sm font-mono font-semibold"
+                          />
+                          {showEndField && (
+                            <input
+                              type="time"
+                              value={endTimeStr}
+                              placeholder="End"
+                              onChange={(e) => setEndTimeStr(e.target.value)}
+                              className="block w-full rounded-xl border border-purple-500/50 px-3 py-2 text-white bg-slate-900 focus:border-purple-400 focus:outline-none focus:ring-1 focus:ring-purple-400 text-sm font-mono font-semibold"
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* 4. Action Button */}
+                      <div>
                         <button
-                          key={n}
+                          type="submit"
+                          disabled={playLoading || ((playGameType === 'Pool' || playGameType === 'MidSnooker') && !endTimeStr && availableTables.length === 0)}
+                          className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-xs font-extrabold uppercase tracking-wider rounded-xl text-white shadow-[0_0_15px_rgba(0,242,254,0.3)] transition-all disabled:opacity-50 custom-button"
+                        >
+                          <Play className="h-4 w-4 mr-1.5" />
+                          {showEndField && endTimeStr ? 'Add Play' : 'Start Play'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Quick chips row for fast 1-click selection */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/60 text-[11px] font-mono">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mr-0.5">Quick Start:</span>
+                        <button
                           type="button"
-                          onClick={() => setPlayPlayerCount(n)}
-                          className={`flex-1 py-2 rounded-xl border text-xs font-extrabold transition-all ${
-                            playPlayerCount === n
-                              ? 'border-cyan-500 bg-cyan-500/20 text-cyan-300'
-                              : 'border-slate-800 bg-slate-900 text-slate-400 hover:border-slate-700'
+                          onClick={() => setStartTimeStr(dateToTimeInput(new Date()))}
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
+                            startTimeStr === dateToTimeInput(new Date())
+                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                              : 'bg-slate-800/60 text-slate-400 hover:text-white border-slate-700/60'
                           }`}
                         >
-                          {n}
+                          Now
                         </button>
-                      ))}
+                        {[-10, -15, -30, -45, -60].map((mins) => {
+                          const tStr = dateToTimeInput(new Date(Date.now() + mins * 60000));
+                          const label = `${mins}m`;
+                          return (
+                            <button
+                              key={mins}
+                              type="button"
+                              onClick={() => setStartTimeStr(tStr)}
+                              className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
+                                startTimeStr === tStr
+                                  ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
+                                  : 'bg-slate-800/60 text-slate-400 hover:text-white border-slate-700/60'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {showEndField && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mr-0.5">Quick End:</span>
+                          <button
+                            type="button"
+                            onClick={() => setEndTimeStr(dateToTimeInput(new Date()))}
+                            className="px-2 py-0.5 rounded-md text-[11px] font-bold border bg-slate-800/60 text-slate-400 hover:text-white border-slate-700/60"
+                          >
+                            Now
+                          </button>
+                          {[30, 60, 90, 120].map((mins) => {
+                            const startD = timeToDate(startTimeStr);
+                            const tStr = dateToTimeInput(new Date(startD.getTime() + mins * 60000));
+                            const label = `+${mins >= 60 ? `${mins / 60}h` : `${mins}m`}`;
+                            return (
+                              <button
+                                key={mins}
+                                type="button"
+                                onClick={() => setEndTimeStr(tStr)}
+                                className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-colors ${
+                                  endTimeStr === tStr
+                                    ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                                    : 'bg-slate-800/60 text-slate-400 hover:text-white border-slate-700/60'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
-
-                {/* Info Text */}
-                <div className="text-xs text-slate-500 pb-2">
-                  {(playGameType === 'Pool' || playGameType === 'MidSnooker') && availableTables.length === 0 ? (
-                    <span className="text-rose-400 font-bold">No tables available</span>
-                  ) : (
-                    <span>Timer & billing start immediately.</span>
-                  )}
-                </div>
-
-                {/* Submit button */}
-                <button
-                  type="submit"
-                  disabled={playLoading || ((playGameType === 'Pool' || playGameType === 'MidSnooker') && availableTables.length === 0)}
-                  className="w-full inline-flex justify-center items-center px-4 py-2.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-xs font-extrabold uppercase tracking-wider rounded-xl text-white shadow-[0_0_15px_rgba(0,242,254,0.3)] transition-all disabled:opacity-50 custom-button"
-                >
-                  <Play className="h-4 w-4 mr-1.5" />
-                  Start Table Play
-                </button>
-              </form>
+                  </form>
                 </>
               );
             })()}
@@ -1104,7 +1273,7 @@ export default function SessionDetailsPage() {
                 className="inline-flex items-center px-4 py-2.5 border border-emerald-500/50 text-xs font-extrabold uppercase tracking-wider rounded-xl text-emerald-300 bg-emerald-950/80 hover:bg-emerald-500 hover:text-black transition-all shadow-[0_0_15px_rgba(16,185,129,0.2)] custom-button"
               >
                 <CreditCard className="h-4 w-4 mr-2" />
-                Record Advance Payment
+                Advance or Partial Payment
               </button>
               <button
                 onClick={() => setShowAddOrder(true)}
@@ -1183,146 +1352,155 @@ export default function SessionDetailsPage() {
           <div className="space-y-6">
 
             {/* Billing Summary */}
-            <div className="bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 p-6 shadow-xl space-y-4">
-              <h3 className="text-base font-extrabold text-white font-display uppercase tracking-wide">Billing Summary</h3>
+            <div className="bg-[#111827]/90 backdrop-blur-2xl rounded-3xl border border-slate-800/90 p-6 shadow-2xl space-y-5">
+              <div className="flex justify-between items-center border-b border-slate-800/80 pb-3">
+                <h3 className="text-sm font-extrabold text-white font-display uppercase tracking-wider flex items-center gap-2">
+                  <CreditCard className="h-4 w-4 text-cyan-400" />
+                  <span>Billing Summary</span>
+                </h3>
+                <span className={`text-[10px] font-mono font-extrabold uppercase px-2.5 py-0.5 rounded-full border ${
+                  isActive 
+                    ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/30' 
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {isActive ? 'Active Bill' : 'Closed Bill'}
+                </span>
+              </div>
 
-              <div className="space-y-2.5 text-sm text-slate-300">
+              {/* Itemized Charges */}
+              <div className="space-y-2 text-xs">
+                {gameTotal > 0 && (
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <Gamepad2 className="h-3.5 w-3.5 text-cyan-400" />
+                      Games & Table Plays
+                    </span>
+                    <span className="font-mono font-bold text-white">₹{gameTotal.toFixed(2)}</span>
+                  </div>
+                )}
                 {cigaretteTotal > 0 && (
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5">
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="flex items-center gap-1.5 font-medium">
                       <Cigarette className="h-3.5 w-3.5 text-rose-400" />
-                      Cigarettes:
+                      Cigarettes
                     </span>
                     <span className="font-mono font-bold text-white">₹{cigaretteTotal.toFixed(2)}</span>
                   </div>
                 )}
                 {coldDrinkTotal > 0 && (
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5">
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="flex items-center gap-1.5 font-medium">
                       <GlassWater className="h-3.5 w-3.5 text-cyan-400" />
-                      Cold Drinks:
+                      Cold Drinks
                     </span>
                     <span className="font-mono font-bold text-white">₹{coldDrinkTotal.toFixed(2)}</span>
                   </div>
                 )}
                 {cafeTotal > 0 && (
-                  <div className="flex justify-between">
-                    <span className="flex items-center gap-1.5">
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span className="flex items-center gap-1.5 font-medium">
                       <Coffee className="h-3.5 w-3.5 text-amber-400" />
-                      Café:
+                      Café Kitchen
                     </span>
                     <span className="font-mono font-bold text-white">₹{cafeTotal.toFixed(2)}</span>
                   </div>
                 )}
-
-                {/* Table Play History / Live play display */}
-                {(completedPlaysTotal > 0 || isTableActive) && (
-                  <div className="space-y-2.5 pt-2 border-t border-slate-800 mt-2">
-                    <h4 className="text-[10px] font-extrabold text-cyan-400 uppercase tracking-widest font-mono">
-                      Table Play Billing
-                    </h4>
-
-                    {/* Completed Table Plays list */}
-                    {session.tablePlays?.filter((tp) => tp.endTime).map((tp) => {
-                      const durMs = new Date(tp.endTime!).getTime() - new Date(tp.startTime).getTime();
-                      const hrs = durMs / 3600000;
-                      const mins = Math.round((durMs % 3600000) / 60000);
-                      const durStr = hrs >= 1
-                        ? `${Math.floor(hrs)}h ${mins}m`
-                        : `${mins}m`;
-
-                      return (
-                        <div key={tp.id} className="flex justify-between text-xs text-slate-400">
-                          <span className="flex items-center gap-1">
-                            ✓ {GAME_LABELS[tp.gameType].split(' ')[0]}
-                            {tp.table && ` (Table ${tp.table.number})`}
-                            <span className="text-[10px] text-slate-500 font-mono ml-1">({durStr})</span>
-                          </span>
-                          <span className="font-mono font-bold text-slate-200">₹{tp.cost}</span>
-                        </div>
-                      );
-                    })}
-
-                  </div>
-                )}
-
                 {(session.customAmount ?? 0) !== 0 && (
-                  <div className={`flex justify-between font-semibold ${(session.customAmount ?? 0) < 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    <span>{(session.customAmount ?? 0) < 0 ? 'Discount:' : 'Extra Charge:'}</span>
+                  <div className={`flex justify-between items-center text-xs font-semibold ${(session.customAmount ?? 0) < 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    <span>{(session.customAmount ?? 0) < 0 ? 'Discount' : 'Extra Surcharge'}</span>
                     <span className="font-mono">
                       {(session.customAmount ?? 0) < 0 ? '−' : '+'}₹{Math.abs(session.customAmount ?? 0).toFixed(2)}
                     </span>
                   </div>
                 )}
-
-                <hr className="border-slate-800" />
-
-                <div className="flex justify-between text-sm font-semibold text-slate-300">
-                  <span>Today's Total:</span>
-                  <span className="font-mono font-bold text-white">₹{todaysTotal.toFixed(2)}</span>
-                </div>
-
-                {originalPriorOutstanding > 0 && (
-                  <div className="flex justify-between text-sm font-semibold text-rose-400">
-                    <span>Prior Outstanding Udhar:</span>
-                    <span className="font-mono font-bold">+₹{originalPriorOutstanding.toFixed(2)}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-between text-base font-extrabold text-white pt-1">
-                  <span>Total Payable Amount:</span>
-                  <span className="font-mono text-cyan-400 tracking-tight glow-text-cyan">₹{totalPayable.toFixed(2)}</span>
-                </div>
-
-                {isActive && amountPaid > 0 && (
-                  <div className="bg-emerald-950/60 p-3 rounded-xl border border-emerald-500/40 text-xs space-y-1 my-2">
-                    <div className="flex justify-between text-emerald-300 font-extrabold">
-                      <span className="flex items-center gap-1.5 font-mono uppercase text-[11px]">
-                        <span>💳</span> Advance Received:
-                      </span>
-                      <span className="font-mono text-emerald-300 text-sm">₹{amountPaid.toFixed(2)}</span>
-                    </div>
-                    <p className="text-[10px] text-emerald-400/80 font-mono">
-                      Deducted automatically from total bill at checkout.
-                    </p>
-                  </div>
-                )}
-
-                {!isActive && amountPaid > 0 && (
-                  <div className="flex justify-between text-sm font-semibold text-emerald-400">
-                    <span>Amount Paid (Session):</span>
-                    <span className="font-mono">−₹{amountPaid.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {!isActive && ledgerSettledAmount > 0 && (
-                  <div className="flex justify-between text-sm font-semibold text-teal-400">
-                    <span>Settled Manually (Ledger):</span>
-                    <span className="font-mono">−₹{ledgerSettledAmount.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {!isActive && amountPaid > 0 && remainingPriorOutstanding > 0 && (
-                  <div className="flex justify-between text-xs font-semibold text-rose-400">
-                    <span>Prior Outstanding Remaining:</span>
-                    <span className="font-mono">₹{remainingPriorOutstanding.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {!isActive && amountPaid > 0 && todayOutstanding > 0 && (
-                  <div className="flex justify-between text-xs font-bold text-amber-400">
-                    <span>Today's Outstanding:</span>
-                    <span className="font-mono">₹{todayOutstanding.toFixed(2)}</span>
-                  </div>
-                )}
-
-                {!isActive && (
-                  <div className={`flex justify-between text-base font-extrabold pt-1.5 border-t border-slate-800 ${netOutstanding > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                    <span>Net Outstanding:</span>
-                    <span className="font-mono">₹{netOutstanding.toFixed(2)}</span>
+                {priorOutstanding > 0 && (
+                  <div className="flex justify-between items-center text-xs font-semibold text-rose-400">
+                    <span>Prior Outstanding Udhar</span>
+                    <span className="font-mono font-bold">+₹{priorOutstanding.toFixed(2)}</span>
                   </div>
                 )}
               </div>
+
+              {/* Subtotals (Bill Total & Advance Paid) */}
+              <div className="pt-3 border-t border-slate-800/80 space-y-2 text-xs">
+                <div className="flex justify-between text-slate-400 font-medium">
+                  <span>Gross Bill Total</span>
+                  <span className="font-mono font-bold text-slate-200">₹{totalPayable.toFixed(2)}</span>
+                </div>
+
+                {amountPaid > 0 && (
+                  <div className="flex justify-between text-emerald-400 font-medium">
+                    <span className="flex items-center gap-1.5">
+                      <span>💳</span> Advance / Partial Paid
+                    </span>
+                    <span className="font-mono font-bold">−₹{amountPaid.toFixed(2)}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Hero Settlement Card */}
+              {isActive ? (
+                amountPaid > totalPayable ? (
+                  /* Case 1: Advance > Bill (e.g. Advance 500, Bill 30 -> Balance 470) */
+                  <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-4 shadow-[0_0_20px_rgba(16,185,129,0.15)] flex justify-between items-center gap-3">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-300 font-mono">
+                          Advance Balance
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-emerald-400/80 font-medium mt-0.5">
+                        Credit remaining with lounge
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-black text-emerald-400 font-mono tracking-tight glow-text-emerald">
+                        ₹{(amountPaid - totalPayable).toFixed(2)}
+                      </div>
+                      <span className="text-[9px] font-mono text-emerald-500 font-bold uppercase">
+                        Due Now: ₹0.00
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  /* Case 2: Bill >= Advance (e.g. Bill 100, Partial Paid 40 -> Total Payable: 60) */
+                  <div className="bg-slate-900/90 border border-cyan-500/40 rounded-2xl p-4 shadow-[0_0_20px_rgba(0,242,254,0.1)] flex justify-between items-center gap-3">
+                    <div>
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-cyan-400 font-mono block">
+                        Net Payable Due
+                      </span>
+                      <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        {amountPaid > 0 ? `After ₹${amountPaid.toFixed(0)} payment` : 'Payable at checkout'}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-black text-white font-mono tracking-tight glow-text-cyan">
+                        ₹{netDue.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                )
+              ) : (
+                /* Completed Session view */
+                <div className={`p-4 rounded-2xl border flex justify-between items-center ${
+                  netOutstanding > 0 
+                    ? 'bg-rose-950/40 border-rose-500/40 text-rose-300' 
+                    : 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300'
+                }`}>
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider font-mono block">
+                      {netOutstanding > 0 ? 'Unpaid Outstanding (Udhar)' : 'Final Status: Fully Settled'}
+                    </span>
+                    <span className="text-xs opacity-80">
+                      {netOutstanding > 0 ? 'Recorded to customer ledger' : 'All dues cleared'}
+                    </span>
+                  </div>
+                  <div className="text-2xl font-black font-mono">
+                    ₹{netOutstanding.toFixed(2)}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2">
                 <button
@@ -1441,6 +1619,123 @@ export default function SessionDetailsPage() {
           onClose={() => setShowCloseSession(false)}
           onSuccess={() => { setShowCloseSession(false); mutate(); }}
         />
+      )}
+
+      {/* Stop Table Play Modal (Fast time-only input) */}
+      {stopPlayTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-in fade-in">
+          <div className="bg-[#111827] rounded-2xl border border-slate-800 w-full max-w-sm shadow-2xl p-5 space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
+              <h3 className="text-sm font-extrabold text-white uppercase tracking-wide flex items-center gap-1.5 font-display">
+                <StopCircle className="h-4 w-4 text-rose-400" />
+                Stop Play
+              </h3>
+              <button
+                type="button"
+                onClick={() => setStopPlayTarget(null)}
+                className="text-slate-500 hover:text-slate-300 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800 text-xs font-mono space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Game:</span>
+                <span className="text-white font-bold">
+                  {stopPlayTarget.gameType === 'PS4'
+                    ? `PS4 (${stopPlayTarget.playerCount}p)`
+                    : `${stopPlayTarget.gameType}${stopPlayTarget.table ? ` (T${stopPlayTarget.table.number})` : ''}`}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Started:</span>
+                <span className="text-emerald-400 font-bold">
+                  {new Date(stopPlayTarget.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono">
+                  End Time
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setStopPlayTimeStr(dateToTimeInput(new Date()))}
+                    className="text-[10px] font-mono text-cyan-400 hover:underline px-1"
+                  >
+                    Now
+                  </button>
+                  {[-5, -10, -15].map((m) => {
+                    const t = dateToTimeInput(new Date(Date.now() + m * 60000));
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setStopPlayTimeStr(t)}
+                        className="text-[10px] font-mono text-slate-400 hover:text-white px-1"
+                      >
+                        {m}m
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <input
+                type="time"
+                value={stopPlayTimeStr}
+                onChange={(e) => setStopPlayTimeStr(e.target.value)}
+                className="block w-full rounded-xl bg-slate-900 border border-slate-700 px-3 py-2 text-white text-xs font-mono font-semibold"
+              />
+            </div>
+
+            {/* Calculated preview */}
+            {(() => {
+              const s = new Date(stopPlayTarget.startTime).getTime();
+              const e = timeToDate(stopPlayTimeStr).getTime();
+              if (e <= s) {
+                return (
+                  <p className="text-[11px] font-mono text-rose-400">End time must be after start time</p>
+                );
+              }
+              const diffMs = e - s;
+              const hrs = diffMs / 3600000;
+              const mins = Math.round(diffMs / 60000);
+              const rate = GAME_RATES[stopPlayTarget.gameType] || 0;
+              const cost = Math.round(stopPlayTarget.gameType === 'PS4'
+                ? rate * stopPlayTarget.playerCount * hrs
+                : rate * hrs);
+
+              return (
+                <div className="flex justify-between items-center text-xs font-mono bg-rose-950/20 border border-rose-500/20 rounded-lg p-2.5">
+                  <span className="text-slate-300">Duration: <strong className="text-white">{mins}m</strong></span>
+                  <span className="text-emerald-400 font-extrabold text-sm">₹{cost}</span>
+                </div>
+              );
+            })()}
+
+            <div className="flex justify-end gap-2 pt-1 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setStopPlayTarget(null)}
+                className="px-3.5 py-1.5 border border-slate-800 text-xs font-bold rounded-xl text-slate-400 hover:bg-slate-800 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={playLoading || (timeToDate(stopPlayTimeStr).getTime() <= new Date(stopPlayTarget.startTime).getTime())}
+                onClick={() => confirmEndTablePlay()}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-xs font-extrabold uppercase tracking-wider rounded-xl text-white shadow-md transition-all disabled:opacity-50"
+              >
+                Stop Play
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

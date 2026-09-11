@@ -22,6 +22,26 @@ router.post('/', authenticateToken, async (req, res) => {
   }
 
   try {
+    const trimmedName = (customerName as string).trim();
+    const trimmedPhone = customerPhone ? (customerPhone as string).trim() : null;
+
+    // Check if customer already has an active session
+    const existingActiveSession = await prisma.session.findFirst({
+      where: {
+        status: 'active',
+        OR: [
+          { customerName: { equals: trimmedName, mode: 'insensitive' } },
+          ...(trimmedPhone ? [{ customerPhone: trimmedPhone }] : [])
+        ]
+      }
+    });
+
+    if (existingActiveSession) {
+      return res.status(400).json({
+        error: `Customer "${existingActiveSession.customerName}" already has an active session (Session ID: ${existingActiveSession.id}). A customer cannot have multiple active sessions at the same time.`
+      });
+    }
+
     // Session ID format: DDMMYYYYHHMMSS_customername
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, '0');
@@ -53,6 +73,21 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
     broadcast({ type: 'SESSION_START', session });
+
+    // Auto-sync into Customer table
+    if (customerPhone && (customerPhone as string).trim()) {
+      const p = (customerPhone as string).trim();
+      const n = (customerName as string).trim();
+      const parts = n.split(/\s+/);
+      const firstName = parts[0] || n;
+      const lastName = parts.slice(1).join(' ');
+      prisma.customer.upsert({
+        where: { phone: p },
+        update: { name: n, firstName, lastName },
+        create: { phone: p, name: n, firstName, lastName }
+      }).catch(err => console.error('Error auto-syncing customer:', err));
+    }
+
     res.status(201).json(session);
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -154,19 +189,49 @@ router.get('/customers/all', authenticateToken, async (req, res) => {
   }
 });
 
-// Get session details
+/**
+ * Helper to fetch all prior unpaid udhars for a customer.
+ * Uses JS filtering to avoid SQL 3-valued NULL logic dropping udhars where sessionId is null.
+ * Also checks both customerName and customerPhone.
+ */
+export async function getPriorUnpaidUdhars(customerName: string, sessionId?: string, customerPhone?: string | null) {
+  const trimmedName = customerName?.trim() || '';
+  if (!trimmedName) return [];
+
+  const orConditions: any[] = [
+    { customerName: { equals: trimmedName, mode: 'insensitive' } }
+  ];
+
+  if (customerPhone) {
+    orConditions.push({
+      session: { customerPhone: customerPhone }
+    });
+  }
+
+  const allCustomerUdhars = await prisma.udhar.findMany({
+    where: {
+      status: 'unpaid',
+      OR: orConditions
+    },
+    orderBy: { createdAt: 'asc' }
+  });
+
+  return allCustomerUdhars.filter((u) => !sessionId || u.sessionId !== sessionId);
+}
+
+// Get single session details
 router.get('/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
   try {
     const session = await prisma.session.findUnique({
-      relationLoadStrategy: 'join',
-      where: { id: req.params.id },
+      where: { id },
       include: {
         table: true,
         orders: {
-          include: { menuItem: true },
-          orderBy: { createdAt: 'asc' }
+          include: { menuItem: true }
         },
-        payments: { orderBy: { createdAt: 'asc' } },
+        payments: true,
         udhars: true,
         tablePlays: {
           include: { table: true },
@@ -179,18 +244,17 @@ router.get('/:id', authenticateToken, async (req, res) => {
       return res.status(404).json({ error: 'Session not found' });
     }
 
-    const priorUdhars = await prisma.udhar.findMany({
-      where: {
-        customerName: { equals: session.customerName.trim(), mode: 'insensitive' },
-        status: 'unpaid',
-        NOT: { sessionId: session.id }
-      }
-    });
+    const priorUdhars = await getPriorUnpaidUdhars(session.customerName, session.id, session.customerPhone);
     const priorUdhar = priorUdhars.reduce((sum, u) => sum + u.amount, 0);
+
+    const settledPriorUdhar = session.udhars
+      ?.filter((u) => u.status === 'paid')
+      .reduce((sum, u) => sum + u.amount, 0) || 0;
 
     res.json({
       ...session,
-      priorUdhar
+      priorUdhar,
+      settledPriorUdhar
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -200,7 +264,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 // Start table play for session
 router.post('/:id/table/start', authenticateToken, async (req, res) => {
   const sessionId = req.params.id;
-  const { gameType, tableId, playerCount, staffUsername } = req.body;
+  const { gameType, tableId, playerCount, staffUsername, startTime, endTime } = req.body;
 
   if (!gameType || !staffUsername) {
     return res.status(400).json({ error: 'gameType and staffUsername are required' });
@@ -230,38 +294,103 @@ router.post('/:id/table/start', authenticateToken, async (req, res) => {
       if (!table) {
         return res.status(404).json({ error: 'Table not found' });
       }
-      if (table.status === 'occupied') {
+      // If NOT an already-ended play, table must not be occupied
+      if (!endTime && table.status === 'occupied') {
         return res.status(400).json({ error: 'Table is already occupied' });
       }
     }
 
     const resolvedPlayerCount = gameType === 'PS4' ? (parseInt(playerCount) || 1) : 1;
 
-    const [_, __, play] = await prisma.$transaction([
-      ...(table ? [prisma.table.update({
-        where: { id: table.id },
-        data: { status: 'occupied' }
-      })] : []),
-      prisma.session.update({
-        where: { id: sessionId },
-        data: {
-          tableId: table ? table.id : session.tableId,
-          gameType: gameType,
-          playerCount: resolvedPlayerCount
-        }
-      }),
-      prisma.tablePlay.create({
-        data: {
-          sessionId,
-          tableId: table ? table.id : null,
-          gameType,
-          playerCount: resolvedPlayerCount,
-          createdBy: staffUsername.toLowerCase(),
-          startTime: new Date()
-        },
-        include: { table: true }
-      })
-    ]);
+    // Parse custom startTime if provided
+    let parsedStart = new Date();
+    if (startTime) {
+      parsedStart = new Date(startTime);
+      if (isNaN(parsedStart.getTime())) {
+        return res.status(400).json({ error: 'Invalid start time format' });
+      }
+    }
+
+    // Check if endTime is provided (custom completed play)
+    let parsedEnd: Date | null = null;
+    let cost = 0;
+    if (endTime) {
+      parsedEnd = new Date(endTime);
+      if (isNaN(parsedEnd.getTime())) {
+        return res.status(400).json({ error: 'Invalid end time format' });
+      }
+      if (parsedEnd.getTime() <= parsedStart.getTime()) {
+        return res.status(400).json({ error: 'End time must be after start time' });
+      }
+
+      const elapsedMs = parsedEnd.getTime() - parsedStart.getTime();
+      const elapsedHours = elapsedMs / 3600000;
+      const rate = GAME_RATES[gameType] || 0;
+      if (gameType === 'PS4') {
+        cost = rate * resolvedPlayerCount * elapsedHours;
+      } else {
+        cost = rate * elapsedHours;
+      }
+      cost = Math.round(cost);
+    }
+
+    let play;
+    if (parsedEnd) {
+      // Completed play: do NOT occupy table, update session gameCost, record tablePlay with endTime & cost
+      const [_, createdPlay] = await prisma.$transaction([
+        prisma.session.update({
+          where: { id: sessionId },
+          data: {
+            tableId: table ? table.id : session.tableId,
+            gameType: gameType,
+            playerCount: resolvedPlayerCount,
+            gameCost: { increment: cost }
+          }
+        }),
+        prisma.tablePlay.create({
+          data: {
+            sessionId,
+            tableId: table ? table.id : null,
+            gameType,
+            playerCount: resolvedPlayerCount,
+            createdBy: staffUsername.toLowerCase(),
+            startTime: parsedStart,
+            endTime: parsedEnd,
+            cost: cost
+          },
+          include: { table: true }
+        })
+      ]);
+      play = createdPlay;
+    } else {
+      // Ongoing play: occupy table (if table), set session active info, record tablePlay with endTime: null
+      const [_, __, createdPlay] = await prisma.$transaction([
+        ...(table ? [prisma.table.update({
+          where: { id: table.id },
+          data: { status: 'occupied' }
+        })] : []),
+        prisma.session.update({
+          where: { id: sessionId },
+          data: {
+            tableId: table ? table.id : session.tableId,
+            gameType: gameType,
+            playerCount: resolvedPlayerCount
+          }
+        }),
+        prisma.tablePlay.create({
+          data: {
+            sessionId,
+            tableId: table ? table.id : null,
+            gameType,
+            playerCount: resolvedPlayerCount,
+            createdBy: staffUsername.toLowerCase(),
+            startTime: parsedStart
+          },
+          include: { table: true }
+        })
+      ]);
+      play = createdPlay;
+    }
 
     broadcast({ type: 'TABLE_PLAY_START', play });
     res.status(201).json(play);
@@ -273,7 +402,7 @@ router.post('/:id/table/start', authenticateToken, async (req, res) => {
 // End table play for session
 router.post('/:id/table/end', authenticateToken, async (req, res) => {
   const sessionId = req.params.id;
-  const { tablePlayId } = req.body;
+  const { tablePlayId, endTime } = req.body;
 
   try {
     const session = await prisma.session.findUnique({
@@ -304,8 +433,16 @@ router.post('/:id/table/end', authenticateToken, async (req, res) => {
       return res.status(400).json({ error: 'No active table play found for this session' });
     }
 
-    const endTime = new Date();
-    const elapsedMs = endTime.getTime() - new Date(activePlay.startTime).getTime();
+    const parsedEnd = endTime ? new Date(endTime) : new Date();
+    if (isNaN(parsedEnd.getTime())) {
+      return res.status(400).json({ error: 'Invalid end time format' });
+    }
+    const playStartTime = new Date(activePlay.startTime);
+    if (parsedEnd.getTime() <= playStartTime.getTime()) {
+      return res.status(400).json({ error: 'End time must be after start time' });
+    }
+
+    const elapsedMs = parsedEnd.getTime() - playStartTime.getTime();
     const elapsedHours = elapsedMs / 3600000;
 
     const rate = GAME_RATES[activePlay.gameType] || 0;
@@ -325,7 +462,7 @@ router.post('/:id/table/end', authenticateToken, async (req, res) => {
       prisma.tablePlay.update({
         where: { id: activePlay.id },
         data: {
-          endTime,
+          endTime: parsedEnd,
           cost
         }
       }),
@@ -393,14 +530,7 @@ router.post('/:id/close', authenticateToken, async (req, res) => {
     const currentSessionTotal = Math.max(0, menuCost + finalGameCost + parsedCustomAmount);
 
     // Fetch prior unpaid udhars
-    const priorUdhars = await prisma.udhar.findMany({
-      where: {
-        customerName: { equals: session.customerName.trim(), mode: 'insensitive' },
-        status: 'unpaid',
-        NOT: { sessionId: session.id }
-      },
-      orderBy: { createdAt: 'asc' }
-    });
+    const priorUdhars = await getPriorUnpaidUdhars(session.customerName, session.id, session.customerPhone);
     const priorUdharTotal = priorUdhars.reduce((sum, u) => sum + u.amount, 0);
 
     const totalBill = currentSessionTotal + priorUdharTotal;
@@ -549,7 +679,8 @@ router.post('/:id/send-whatsapp', authenticateToken, async (req, res) => {
     const completedPlaysTotal = session.tablePlays?.filter((tp) => tp.endTime).reduce((s, tp) => s + tp.cost, 0) || 0;
     const gameTotal = completedPlaysTotal;
     const todaysTotal = session.status === 'completed' ? session.totalBill : (menuCost + gameTotal + (session.customAmount || 0));
-    const priorOutstanding = (session as any).priorUdhar || 0;
+    const priorUdhars = await getPriorUnpaidUdhars(session.customerName, session.id, session.customerPhone);
+    const priorOutstanding = priorUdhars.reduce((sum, u) => sum + u.amount, 0);
     const amountPaid = session.payments?.reduce((s, p) => s + p.amount, 0) || 0;
 
     const todayOutstanding = session.status === 'completed'
