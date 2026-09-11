@@ -200,6 +200,7 @@ interface TablePlaySectionProps {
   isActive: boolean;
   activePlayElapsed: string;
   onEndPlay: (tablePlayId?: number) => void;
+  onDeletePlay?: (tablePlayId: number) => void;
 }
 
 const TablePlaySection: React.FC<TablePlaySectionProps> = ({
@@ -207,6 +208,7 @@ const TablePlaySection: React.FC<TablePlaySectionProps> = ({
   isActive,
   activePlayElapsed,
   onEndPlay,
+  onDeletePlay,
 }) => {
   if (!tablePlays || tablePlays.length === 0) return null;
 
@@ -299,18 +301,27 @@ const TablePlaySection: React.FC<TablePlaySectionProps> = ({
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-3 ml-4">
+              <div className="flex items-center gap-2.5 ml-4 shrink-0">
                 <span className={`font-mono font-bold ${isLive ? 'text-purple-400 animate-pulse' : 'text-white'}`}>
                   {costStr}
                 </span>
                 {isLive && isActive && (
                   <button
                     onClick={() => onEndPlay(tp.id)}
-                    className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-wider bg-rose-950/80 text-rose-300 border border-rose-500/50 rounded-lg hover:bg-rose-600 hover:text-white transition-all shadow-sm flex items-center gap-1 shrink-0"
+                    className="px-2 py-1 text-[10px] font-extrabold uppercase tracking-wider bg-rose-950/80 text-rose-300 border border-rose-500/50 rounded-lg hover:bg-rose-600 hover:text-white transition-all shadow-sm flex items-center gap-1 shrink-0 cursor-pointer"
                     title="Stop this game play"
                   >
                     <StopCircle className="h-3 w-3 text-rose-400 group-hover:text-white" />
                     Stop
+                  </button>
+                )}
+                {isActive && onDeletePlay && (
+                  <button
+                    onClick={() => onDeletePlay(tp.id)}
+                    className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-950/50 border border-transparent hover:border-rose-500/30 rounded-lg transition-all shrink-0 cursor-pointer"
+                    title="Delete this table play"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
               </div>
@@ -626,6 +637,33 @@ export default function SessionDetailsPage() {
       mutateTables();
     } finally {
       setPlayLoading(false);
+    }
+  };
+
+  const handleDeleteTablePlay = async (tablePlayId: number) => {
+    if (!confirm('Are you sure you want to delete this table play? This will free the table and remove it from the bill.')) return;
+    if (!session) return;
+
+    const updatedPlays = session.tablePlays?.filter((tp) => tp.id !== tablePlayId) || [];
+    const remainingCompletedCost = updatedPlays.filter((tp) => tp.endTime).reduce((sum, tp) => sum + (tp.cost || 0), 0);
+    const newTotalBill = Math.max(0, session.menuCost + remainingCompletedCost + (session.customAmount || 0));
+
+    // Optimistic UI update
+    mutate({
+      ...session,
+      tablePlays: updatedPlays,
+      gameCost: remainingCompletedCost,
+      totalBill: newTotalBill
+    }, false);
+
+    try {
+      await api.delete(`/sessions/${session.id}/table-play/${tablePlayId}`);
+      mutate();
+      mutateTables();
+    } catch (e: any) {
+      alert(e.message || 'Failed to delete table play');
+      mutate();
+      mutateTables();
     }
   };
 
@@ -1347,6 +1385,7 @@ export default function SessionDetailsPage() {
                   isActive={isActive}
                   activePlayElapsed={activePlayElapsed}
                   onEndPlay={handleEndTablePlay}
+                  onDeletePlay={handleDeleteTablePlay}
                 />
               </>
             )}

@@ -481,6 +481,104 @@ router.post('/:id/table/end', authenticateToken, async (req, res) => {
   }
 });
 
+// Delete / Cancel table play from session (frees table if ongoing, reverses cost if completed)
+router.delete('/:id/table-play/:playId', authenticateToken, async (req, res) => {
+  const sessionId = req.params.id;
+  const playId = parseInt(req.params.playId);
+
+  if (isNaN(playId)) {
+    return res.status(400).json({ error: 'Invalid table play ID' });
+  }
+
+  try {
+    const play = await prisma.tablePlay.findUnique({
+      where: { id: playId },
+      include: { table: true }
+    });
+
+    if (!play || play.sessionId !== sessionId) {
+      return res.status(404).json({ error: 'Table play record not found' });
+    }
+
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+      include: {
+        tablePlays: true,
+        payments: true
+      }
+    });
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot delete table play from a closed session' });
+    }
+
+    const isLive = !play.endTime;
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete the table play record
+      await tx.tablePlay.delete({
+        where: { id: playId }
+      });
+
+      // 2. If it was an ongoing live play with a physical table, free the table if no other session/play uses it
+      if (isLive && play.tableId) {
+        const otherActivePlay = await tx.tablePlay.findFirst({
+          where: {
+            tableId: play.tableId,
+            endTime: null,
+            id: { not: playId }
+          }
+        });
+        if (!otherActivePlay) {
+          const updatedTable = await tx.table.update({
+            where: { id: play.tableId },
+            data: { status: 'available' }
+          });
+          broadcast({ type: 'TABLE_UPDATE', table: updatedTable });
+        }
+      }
+
+      // 3. Recalculate session gameCost from remaining completed plays
+      const remainingCompletedPlays = session.tablePlays.filter(tp => tp.id !== playId && tp.endTime);
+      const newGameCost = remainingCompletedPlays.reduce((sum, tp) => sum + (tp.cost || 0), 0);
+      const newTotalBill = Math.max(0, session.menuCost + newGameCost + (session.customAmount || 0));
+
+      // 4. Update session tableId if it pointed to this table
+      let newSessionTableId = session.tableId;
+      if (session.tableId === play.tableId) {
+        const remainingLivePlay = session.tablePlays.find(tp => tp.id !== playId && !tp.endTime && tp.tableId);
+        newSessionTableId = remainingLivePlay?.tableId || null;
+      }
+
+      const updatedSession = await tx.session.update({
+        where: { id: sessionId },
+        data: {
+          gameCost: newGameCost,
+          totalBill: newTotalBill,
+          tableId: newSessionTableId
+        },
+        include: {
+          table: true,
+          orders: { include: { menuItem: true } },
+          payments: true,
+          tablePlays: { include: { table: true } }
+        }
+      });
+
+      broadcast({ type: 'TABLE_PLAY_DELETE', playId, sessionId, tableId: play.tableId });
+      broadcast({ type: 'SESSION_UPDATE', session: updatedSession });
+    });
+
+    res.json({ message: 'Table play deleted successfully', playId, sessionId });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Close / Complete session — auto-calculates game cost and settlements
 router.post('/:id/close', authenticateToken, async (req, res) => {
   const { customAmount, amountPaid, paymentMethod } = req.body;
