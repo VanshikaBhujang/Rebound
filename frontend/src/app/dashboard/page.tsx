@@ -30,7 +30,8 @@ import {
   Eye,
   Lock,
   Unlock,
-  Search
+  Search,
+  Loader2
 } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -56,7 +57,33 @@ export default function DashboardPage() {
   const [activeOrderSessionId, setActiveOrderSessionId] = useState<string | null>(null);
   const [liveSessionSearch, setLiveSessionSearch] = useState('');
   const [globalSearch, setGlobalSearch] = useState('');
+  const [searchCompletedResults, setSearchCompletedResults] = useState<Session[]>([]);
+  const [isSearchingCompleted, setIsSearchingCompleted] = useState(false);
   const globalSearchRef = useRef<HTMLInputElement>(null);
+
+  // Debounced search across entire database for completed sessions
+  useEffect(() => {
+    const query = globalSearch.trim();
+    if (!query) {
+      setSearchCompletedResults([]);
+      setIsSearchingCompleted(false);
+      return;
+    }
+
+    const handler = setTimeout(async () => {
+      try {
+        setIsSearchingCompleted(true);
+        const res = await api.get(`/sessions/completed?search=${encodeURIComponent(query)}&limit=30`);
+        setSearchCompletedResults(res.sessions || []);
+      } catch (err) {
+        console.error('Failed to search completed sessions:', err);
+      } finally {
+        setIsSearchingCompleted(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(handler);
+  }, [globalSearch]);
   // Add Udhar state
   const [newUdharCustomer, setNewUdharCustomer] = useState('');
   const [newUdharAmount, setNewUdharAmount] = useState('');
@@ -610,7 +637,11 @@ export default function DashboardPage() {
         {/* Global Search Bar */}
         <div className="relative">
           <div className="relative flex items-center bg-[#111827]/80 backdrop-blur-xl rounded-2xl border border-slate-800 shadow-xl px-4 py-3 gap-3 focus-within:border-cyan-500/60 focus-within:shadow-[0_0_20px_rgba(0,242,254,0.1)] transition-all duration-300">
-            <Search className="h-4 w-4 text-cyan-400 shrink-0" />
+            {isSearchingCompleted ? (
+              <Loader2 className="h-4 w-4 text-cyan-400 shrink-0 animate-spin" />
+            ) : (
+              <Search className="h-4 w-4 text-cyan-400 shrink-0" />
+            )}
             <input
               ref={globalSearchRef}
               type="text"
@@ -632,9 +663,30 @@ export default function DashboardPage() {
           {/* Search Results Dropdown */}
           {globalSearch.trim() && (() => {
             const q = globalSearch.trim().toLowerCase();
-            const matchedActive = activeSessions.filter(s => s.customerName.toLowerCase().includes(q));
-            const matchedCompleted = completedSessions.filter(s => s.customerName.toLowerCase().includes(q));
-            const hasResults = matchedActive.length > 0 || matchedCompleted.length > 0;
+            const matchedActive = activeSessions.filter(s => 
+              s.customerName.toLowerCase().includes(q) || 
+              (s.customerPhone && s.customerPhone.includes(q))
+            );
+
+            // Pool of completed sessions: prefer live backend DB search results; fallback to local
+            const completedPool = searchCompletedResults.length > 0 
+              ? searchCompletedResults 
+              : completedSessions.filter(s => s.customerName.toLowerCase().includes(q));
+
+            // Deduplicate completed sessions by unique customer (by phone or lowercased name)
+            const customerMap = new Map<string, { latestSession: Session; count: number; totalSpent: number }>();
+            for (const s of completedPool) {
+              const key = (s.customerPhone?.trim() || s.customerName.toLowerCase().trim());
+              if (!customerMap.has(key)) {
+                customerMap.set(key, { latestSession: s, count: 1, totalSpent: s.totalBill || 0 });
+              } else {
+                const item = customerMap.get(key)!;
+                item.count += 1;
+                item.totalSpent += (s.totalBill || 0);
+              }
+            }
+            const matchedCompleted = Array.from(customerMap.values());
+            const hasResults = matchedActive.length > 0 || matchedCompleted.length > 0 || isSearchingCompleted;
 
             return (
               <div className="absolute top-full left-0 right-0 mt-2 z-40 bg-[#0e131f]/95 backdrop-blur-2xl border border-slate-700/80 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.8)] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
@@ -688,39 +740,61 @@ export default function DashboardPage() {
                       )}
                     </div>
 
-                    {/* Completed Sessions Section */}
+                    {/* Completed Sessions Section (Deduplicated 1 per Customer) */}
                     <div className="p-4">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="inline-block w-2 h-2 rounded-full bg-slate-400"></span>
-                        <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-mono">Completed Sessions</span>
-                        <span className="text-[10px] font-bold text-slate-500 font-mono">({matchedCompleted.length})</span>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-block w-2 h-2 rounded-full bg-slate-400"></span>
+                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-mono">
+                            Completed Sessions {matchedCompleted.length > 0 && '(1 per customer)'}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-500 font-mono">({matchedCompleted.length})</span>
+                        </div>
+                        {isSearchingCompleted && (
+                          <span className="text-[10px] font-mono text-cyan-400 animate-pulse flex items-center gap-1">
+                            <Loader2 className="h-3 w-3 animate-spin" /> Searching DB...
+                          </span>
+                        )}
                       </div>
                       {matchedCompleted.length === 0 ? (
-                        <p className="text-xs text-slate-600 font-semibold pl-4">No completed sessions match.</p>
+                        <p className="text-xs text-slate-600 font-semibold pl-4">
+                          {isSearchingCompleted ? 'Searching database...' : 'No completed sessions match.'}
+                        </p>
                       ) : (
                         <div className="space-y-2">
-                          {matchedCompleted.map((session) => {
+                          {matchedCompleted.map(({ latestSession, count, totalSpent }) => {
                             const formatTime = (d: string | Date) => new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                             const formatDate = (d: string | Date) => new Date(d).toLocaleDateString([], { day: '2-digit', month: 'short' });
                             return (
                               <div
-                                key={session.id}
-                                onClick={() => { router.push(`/sessions/${session.id}`); setGlobalSearch(''); }}
+                                key={latestSession.id}
+                                onClick={() => { router.push(`/sessions/${latestSession.id}`); setGlobalSearch(''); }}
                                 className="flex items-center justify-between bg-slate-900/80 hover:bg-slate-800/80 border border-slate-800 hover:border-cyan-500/40 rounded-xl px-4 py-3 cursor-pointer transition-all duration-200 group"
                               >
                                 <div className="flex items-center gap-3 min-w-0">
                                   <span className="w-1.5 h-8 rounded-full bg-slate-600 shrink-0"></span>
                                   <div className="min-w-0">
-                                    <p className="font-extrabold text-white text-sm truncate">{session.customerName}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-extrabold text-white text-sm truncate">{latestSession.customerName}</p>
+                                      {count > 1 && (
+                                        <span className="text-[9px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-500/30 px-1.5 py-0.2 rounded-full shrink-0">
+                                          {count} sessions
+                                        </span>
+                                      )}
+                                    </div>
                                     <p className="text-[10px] text-slate-400 font-mono truncate">
-                                      {session.startTime && session.endTime
-                                        ? `${formatTime(session.startTime)} – ${formatTime(session.endTime)} · ${formatDate(session.endTime)}`
+                                      {latestSession.startTime && latestSession.endTime
+                                        ? `${formatTime(latestSession.startTime)} – ${formatTime(latestSession.endTime)} · ${formatDate(latestSession.endTime)}`
                                         : 'Closed'}
+                                      {count > 1 && ` · Total: ₹${totalSpent.toFixed(0)}`}
                                     </p>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-3 shrink-0">
-                                  <span className="font-mono font-extrabold text-cyan-400 text-sm">₹{(session.totalBill || 0).toFixed(0)}</span>
+                                  <div className="text-right">
+                                    <span className="font-mono font-extrabold text-cyan-400 text-sm block">₹{(latestSession.totalBill || 0).toFixed(0)}</span>
+                                    {count > 1 && <span className="text-[9px] text-slate-500 font-mono block">latest</span>}
+                                  </div>
                                   <Eye className="h-3.5 w-3.5 text-slate-500 group-hover:text-cyan-400 transition-colors" />
                                 </div>
                               </div>
